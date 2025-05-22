@@ -1,4 +1,4 @@
-# Final app.py fix: Regenerate session data directly from CSV, no JSON or in-memory dependency
+# Final fix: encode lat/lon/radius into the QR URL to ensure QR works even after Render restarts
 from flask import Flask, render_template, request, redirect, url_for, send_file, session
 import pandas as pd
 import qrcode
@@ -57,16 +57,10 @@ def upload():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
         df.to_csv(filepath, index=False)
 
-        # Save metadata as a first-row header in the CSV itself (hacky persistence)
-        with open(filepath, 'r') as original:
-            lines = original.readlines()
-        with open(filepath, 'w') as modified:
-            modified.write(f'#META,{latitude},{longitude},{radius}\n')
-            modified.writelines(lines)
-
         used_devices[session_id] = set()
 
-        url = BASE_URL + 'scan/' + session_id
+        # Embed session data directly in QR URL
+        url = f"{BASE_URL}scan/{session_id}?lat={latitude}&lon={longitude}&radius={radius}"
         qr = qrcode.make(url)
         qr_path = os.path.join('static', 'qr', session_id + '.png')
         qr.save(qr_path)
@@ -75,38 +69,36 @@ def upload():
     else:
         return 'File not uploaded.'
 
-def get_session_from_csv(session_id):
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
-    if not os.path.exists(filepath):
-        return None
-    with open(filepath, 'r') as f:
-        meta_line = f.readline()
-        if not meta_line.startswith('#META'):
-            return None
-        parts = meta_line.strip().split(',')
-        latitude = float(parts[1])
-        longitude = float(parts[2])
-        radius = float(parts[3])
-    return {
-        'filename': filepath,
-        'latitude': latitude,
-        'longitude': longitude,
-        'radius': radius
-    }
-
 @app.route('/scan/<session_id>')
 def scan(session_id):
-    session_data = get_session_from_csv(session_id)
-    if not session_data:
-        return 'Invalid session ID.'
+    # Retrieve lat/lon/radius from query params
+    try:
+        latitude = float(request.args.get('lat'))
+        longitude = float(request.args.get('lon'))
+        radius = float(request.args.get('radius'))
+    except (TypeError, ValueError):
+        return 'Invalid or missing session parameters.'
 
-    df = pd.read_csv(session_data['filename'], skiprows=1)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
+    if not os.path.exists(filepath):
+        return 'Attendance data file is missing. Please contact the teacher.'
+
+    df = pd.read_csv(filepath)
     students = df.to_dict(orient='records')
     roll_col = df.columns[0]
     name_col = df.columns[1]
 
     if 'user_token' not in session:
         session['user_token'] = str(uuid.uuid4())
+
+    # Store session info temporarily in global map for validation during mark
+    session_data = {
+        'filename': filepath,
+        'latitude': latitude,
+        'longitude': longitude,
+        'radius': radius
+    }
+    session['current_session'] = session_data
 
     return render_template('student_list.html', students=students, session_id=session_id, roll_col=roll_col, name_col=name_col)
 
@@ -129,9 +121,9 @@ def mark_attendance():
     except ValueError:
         return 'Invalid latitude or longitude.'
 
-    session_data = get_session_from_csv(session_id)
+    session_data = session.get('current_session')
     if not session_data:
-        return 'Invalid session.'
+        return 'Session metadata missing. Please re-scan the QR code.'
 
     dist = haversine(lat, lon, session_data['latitude'], session_data['longitude'])
     if dist > session_data['radius']:
@@ -147,7 +139,8 @@ def mark_attendance():
     if device_key in used_devices[session_id]:
         return 'Attendance already submitted from this device.'
 
-    df = pd.read_csv(session_data['filename'], skiprows=1)
+    filepath = session_data['filename']
+    df = pd.read_csv(filepath)
     df.columns = df.columns.str.strip().str.lower()
     valid_pairs = {(str(row[df.columns[0]]).strip().lower(), str(row[df.columns[1]]).strip().lower()) for _, row in df.iterrows()}
 

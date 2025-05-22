@@ -1,4 +1,4 @@
-# Updated app.py with IP-based restrictions and name/roll display
+# Updated app.py with IP-based and roll-name pair restriction
 from flask import Flask, render_template, request, redirect, url_for, send_file
 import pandas as pd
 import qrcode
@@ -23,7 +23,7 @@ sessions = {}  # session_id -> session details
 attendance = {}  # session_id -> list of marked entries
 
 # ✅ Use Render public URL instead of localhost
-BASE_URL = 'https://Smart-Attendance-Management-System.onrender.com/'
+BASE_URL = 'https://attendance-system-project.onrender.com/'
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000  # Earth radius in meters
@@ -97,8 +97,8 @@ def scan(session_id):
 @app.route('/mark', methods=['POST'])
 def mark_attendance():
     session_id = request.form['session_id']
-    name = request.form['name']
-    roll = request.form['roll_number']
+    name = request.form['name'].strip().lower()
+    roll = request.form['roll_number'].strip().lower()
     lat = request.form.get('latitude')
     lon = request.form.get('longitude')
     ip_address = request.remote_addr
@@ -123,6 +123,14 @@ def mark_attendance():
 
     if session_id not in attendance:
         attendance[session_id] = []
+
+    # ✅ Load student list to validate roll-name pair
+    df = pd.read_csv(session['filename'])
+    df.columns = df.columns.str.strip().str.lower()
+    valid_pairs = {(str(row[df.columns[0]]).strip().lower(), str(row[df.columns[1]]).strip().lower()) for _, row in df.iterrows()}
+
+    if (roll, name) not in valid_pairs:
+        return 'Invalid roll number and name combination.'
 
     for record in attendance[session_id]:
         if record['roll'] == roll:

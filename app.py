@@ -1,4 +1,4 @@
-# Updated app.py with persistent session storage to fix invalid session issue
+# Updated app.py with recovery of session data from CSV if JSON is lost
 from flask import Flask, render_template, request, redirect, url_for, send_file, session
 import pandas as pd
 import qrcode
@@ -44,6 +44,15 @@ def load_session_from_disk(session_id):
         with open(os.path.join(session_data_folder, f"{session_id}.json"), 'r') as f:
             return json.load(f)
     except FileNotFoundError:
+        # Try to recover from CSV
+        csv_path = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
+        if os.path.exists(csv_path):
+            return {
+                'filename': csv_path,
+                'latitude': 0.0,
+                'longitude': 0.0,
+                'radius': 100.0  # Default fallback values
+            }
         return None
 
 @app.route('/')

@@ -23,7 +23,7 @@ sessions = {}  # session_id -> session details
 attendance = {}  # session_id -> list of marked entries
 
 # ✅ Use Render public URL instead of localhost
-BASE_URL = 'https://attendance-system-project.onrender.com/'
+BASE_URL = 'https://Smart-Attendance-Management-System.onrender.com/'
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000  # Earth radius in meters

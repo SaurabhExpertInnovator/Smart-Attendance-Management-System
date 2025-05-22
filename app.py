@@ -1,10 +1,9 @@
-# Updated app.py with recovery of session data from CSV if JSON is lost
+# Final app.py fix: Regenerate session data directly from CSV, no JSON or in-memory dependency
 from flask import Flask, render_template, request, redirect, url_for, send_file, session
 import pandas as pd
 import qrcode
 import uuid
 import os
-import json
 from datetime import datetime
 from io import BytesIO
 from pytz import timezone
@@ -13,13 +12,9 @@ import math
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-session_data_folder = 'session_data'
-
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(os.path.join('static', 'qr'), exist_ok=True)
-os.makedirs(session_data_folder, exist_ok=True)
 
-sessions = {}
 attendance = {}
 used_devices = {}
 
@@ -34,26 +29,6 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
-
-def save_session_to_disk(session_id, data):
-    with open(os.path.join(session_data_folder, f"{session_id}.json"), 'w') as f:
-        json.dump(data, f)
-
-def load_session_from_disk(session_id):
-    try:
-        with open(os.path.join(session_data_folder, f"{session_id}.json"), 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        # Try to recover from CSV
-        csv_path = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
-        if os.path.exists(csv_path):
-            return {
-                'filename': csv_path,
-                'latitude': 0.0,
-                'longitude': 0.0,
-                'radius': 100.0  # Default fallback values
-            }
-        return None
 
 @app.route('/')
 def index():
@@ -82,15 +57,13 @@ def upload():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
         df.to_csv(filepath, index=False)
 
-        session_info = {
-            'filename': filepath,
-            'latitude': latitude,
-            'longitude': longitude,
-            'radius': radius
-        }
+        # Save metadata as a first-row header in the CSV itself (hacky persistence)
+        with open(filepath, 'r') as original:
+            lines = original.readlines()
+        with open(filepath, 'w') as modified:
+            modified.write(f'#META,{latitude},{longitude},{radius}\n')
+            modified.writelines(lines)
 
-        sessions[session_id] = session_info
-        save_session_to_disk(session_id, session_info)
         used_devices[session_id] = set()
 
         url = BASE_URL + 'scan/' + session_id
@@ -102,16 +75,32 @@ def upload():
     else:
         return 'File not uploaded.'
 
+def get_session_from_csv(session_id):
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
+    if not os.path.exists(filepath):
+        return None
+    with open(filepath, 'r') as f:
+        meta_line = f.readline()
+        if not meta_line.startswith('#META'):
+            return None
+        parts = meta_line.strip().split(',')
+        latitude = float(parts[1])
+        longitude = float(parts[2])
+        radius = float(parts[3])
+    return {
+        'filename': filepath,
+        'latitude': latitude,
+        'longitude': longitude,
+        'radius': radius
+    }
+
 @app.route('/scan/<session_id>')
 def scan(session_id):
-    session_data = sessions.get(session_id)
+    session_data = get_session_from_csv(session_id)
     if not session_data:
-        session_data = load_session_from_disk(session_id)
-        if not session_data:
-            return 'Invalid session ID.'
-        sessions[session_id] = session_data
+        return 'Invalid session ID.'
 
-    df = pd.read_csv(session_data['filename'])
+    df = pd.read_csv(session_data['filename'], skiprows=1)
     students = df.to_dict(orient='records')
     roll_col = df.columns[0]
     name_col = df.columns[1]
@@ -140,12 +129,9 @@ def mark_attendance():
     except ValueError:
         return 'Invalid latitude or longitude.'
 
-    session_data = sessions.get(session_id)
+    session_data = get_session_from_csv(session_id)
     if not session_data:
-        session_data = load_session_from_disk(session_id)
-        if not session_data:
-            return 'Invalid session.'
-        sessions[session_id] = session_data
+        return 'Invalid session.'
 
     dist = haversine(lat, lon, session_data['latitude'], session_data['longitude'])
     if dist > session_data['radius']:
@@ -158,11 +144,10 @@ def mark_attendance():
         used_devices[session_id] = set()
 
     device_key = f"{ip_address}_{device_token}"
-
     if device_key in used_devices[session_id]:
         return 'Attendance already submitted from this device.'
 
-    df = pd.read_csv(session_data['filename'])
+    df = pd.read_csv(session_data['filename'], skiprows=1)
     df.columns = df.columns.str.strip().str.lower()
     valid_pairs = {(str(row[df.columns[0]]).strip().lower(), str(row[df.columns[1]]).strip().lower()) for _, row in df.iterrows()}
 

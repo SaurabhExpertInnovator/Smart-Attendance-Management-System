@@ -47,11 +47,19 @@
       margin-top: 10px;
       text-align: center;
     }
+    #already-submitted {
+      color: #d32f2f;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 20px;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <h2>Select Your Name and Roll Number</h2>
   <div class="note" id="note">Fetching your location... Please allow location access.</div>
+  <div id="already-submitted">Attendance already submitted from this device for this session.</div>
 
   <form id="attendanceForm" method="POST" action="/mark">
     <input type="hidden" name="session_id" value="{{ session_id }}">
@@ -84,10 +92,14 @@
     const sessionId = "{{ session_id }}";
     const localStorageKey = `attendance_submitted_${sessionId}`;
 
-    // Check if attendance was already submitted from this device
-    if (localStorage.getItem(localStorageKey) === "true") {
-      alert("Attendance already submitted from this device for this session.");
+    function disableForm() {
       document.querySelectorAll("input, button").forEach(el => el.disabled = true);
+      document.getElementById("already-submitted").style.display = "block";
+    }
+
+    // Prevent double submission
+    if (localStorage.getItem(localStorageKey) === "true") {
+      disableForm();
     }
 
     window.onload = function () {
@@ -121,7 +133,7 @@
       });
     });
 
-    // Prevent double submission
+    // Lock on submit
     document.getElementById('attendanceForm').addEventListener('submit', function (e) {
       const lat = document.getElementById("latitude").value;
       const lon = document.getElementById("longitude").value;
@@ -130,7 +142,6 @@
         alert("Location access is required to submit attendance.");
         return;
       }
-
       localStorage.setItem(localStorageKey, "true");
     });
   </script>

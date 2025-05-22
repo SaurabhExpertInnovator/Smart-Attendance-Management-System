@@ -1,4 +1,4 @@
-#app.py
+# Updated app.py with IP-based restrictions and name/roll display
 from flask import Flask, render_template, request, redirect, url_for, send_file
 import pandas as pd
 import qrcode
@@ -101,6 +101,7 @@ def mark_attendance():
     roll = request.form['roll_number']
     lat = request.form.get('latitude')
     lon = request.form.get('longitude')
+    ip_address = request.remote_addr
 
     if not lat or not lon:
         return 'Location access is required to mark attendance.'
@@ -126,13 +127,16 @@ def mark_attendance():
     for record in attendance[session_id]:
         if record['roll'] == roll:
             return 'Attendance already marked for this roll number.'
+        if record['ip'] == ip_address:
+            return 'Attendance already submitted from this device/IP.'
 
     india_time = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
 
     attendance[session_id].append({
         'name': name,
         'roll': roll,
-        'timestamp': india_time
+        'timestamp': india_time,
+        'ip': ip_address
     })
 
     return 'Attendance marked successfully!'

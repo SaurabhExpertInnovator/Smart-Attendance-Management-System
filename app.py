@@ -1,28 +1,27 @@
-# Updated app.py with strong device restriction using IP + session cookie
-from flask import Flask, render_template, request, redirect, url_for, send_file, session, make_response
+# Updated app.py with persistent session storage to fix invalid session issue
+from flask import Flask, render_template, request, redirect, url_for, send_file, session
 import pandas as pd
 import qrcode
 import uuid
 import os
+import json
 from datetime import datetime
 from io import BytesIO
 from pytz import timezone
 import math
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  # For securely storing sessions
+app.secret_key = os.urandom(24)
 app.config['UPLOAD_FOLDER'] = 'uploads'
+session_data_folder = 'session_data'
 
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(os.path.join('static', 'qr'), exist_ok=True)
+os.makedirs(session_data_folder, exist_ok=True)
 
-# Ensure static/qr folder exists
-qr_folder = os.path.join('static', 'qr')
-os.makedirs(qr_folder, exist_ok=True)
-
-sessions = {}  # session_id -> session details
-attendance = {}  # session_id -> list of marked entries
-used_devices = {}  # session_id -> set of unique IP/session keys
+sessions = {}
+attendance = {}
+used_devices = {}
 
 BASE_URL = 'https://attendance-system-project.onrender.com/'
 
@@ -35,6 +34,17 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+def save_session_to_disk(session_id, data):
+    with open(os.path.join(session_data_folder, f"{session_id}.json"), 'w') as f:
+        json.dump(data, f)
+
+def load_session_from_disk(session_id):
+    try:
+        with open(os.path.join(session_data_folder, f"{session_id}.json"), 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
 
 @app.route('/')
 def index():
@@ -63,18 +73,20 @@ def upload():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
         df.to_csv(filepath, index=False)
 
-        sessions[session_id] = {
+        session_info = {
             'filename': filepath,
             'latitude': latitude,
             'longitude': longitude,
             'radius': radius
         }
 
+        sessions[session_id] = session_info
+        save_session_to_disk(session_id, session_info)
         used_devices[session_id] = set()
 
         url = BASE_URL + 'scan/' + session_id
         qr = qrcode.make(url)
-        qr_path = os.path.join(qr_folder, session_id + '.png')
+        qr_path = os.path.join('static', 'qr', session_id + '.png')
         qr.save(qr_path)
 
         return render_template('qr_display.html', qr_path='qr/' + session_id + '.png', session_id=session_id)
@@ -85,14 +97,16 @@ def upload():
 def scan(session_id):
     session_data = sessions.get(session_id)
     if not session_data:
-        return 'Invalid session ID.'
+        session_data = load_session_from_disk(session_id)
+        if not session_data:
+            return 'Invalid session ID.'
+        sessions[session_id] = session_data
 
     df = pd.read_csv(session_data['filename'])
     students = df.to_dict(orient='records')
     roll_col = df.columns[0]
     name_col = df.columns[1]
 
-    # Assign a unique session key if not already
     if 'user_token' not in session:
         session['user_token'] = str(uuid.uuid4())
 
@@ -119,7 +133,10 @@ def mark_attendance():
 
     session_data = sessions.get(session_id)
     if not session_data:
-        return 'Invalid session.'
+        session_data = load_session_from_disk(session_id)
+        if not session_data:
+            return 'Invalid session.'
+        sessions[session_id] = session_data
 
     dist = haversine(lat, lon, session_data['latitude'], session_data['longitude'])
     if dist > session_data['radius']:
@@ -131,7 +148,6 @@ def mark_attendance():
     if session_id not in used_devices:
         used_devices[session_id] = set()
 
-    # Unique device/session combination
     device_key = f"{ip_address}_{device_token}"
 
     if device_key in used_devices[session_id]:

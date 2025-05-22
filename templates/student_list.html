@@ -81,17 +81,27 @@
   </form>
 
   <script>
-    // On load, try to get location
-    window.onload = function() {
+    const sessionId = "{{ session_id }}";
+    const localStorageKey = `attendance_submitted_${sessionId}`;
+
+    // Check if attendance was already submitted from this device
+    if (localStorage.getItem(localStorageKey) === "true") {
+      alert("Attendance already submitted from this device for this session.");
+      document.querySelectorAll("input, button").forEach(el => el.disabled = true);
+    }
+
+    window.onload = function () {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-          function(position) {
+          function (position) {
             document.getElementById("latitude").value = position.coords.latitude;
             document.getElementById("longitude").value = position.coords.longitude;
             document.getElementById("note").style.display = "none";
-            document.getElementById("submitBtn").disabled = false;
+            if (!localStorage.getItem(localStorageKey)) {
+              document.getElementById("submitBtn").disabled = false;
+            }
           },
-          function(error) {
+          function (error) {
             document.getElementById("note").innerText = "Location access denied or unavailable. Attendance cannot be marked.";
             alert("Please allow location access and refresh the page to mark attendance.");
             document.getElementById("submitBtn").disabled = true;
@@ -104,21 +114,24 @@
       }
     };
 
-    // Update hidden name field when a student is selected
+    // Save student name on roll selection
     document.querySelectorAll('input[name="roll_number"]').forEach(radio => {
-      radio.addEventListener('change', function() {
+      radio.addEventListener('change', function () {
         document.getElementById('student_name').value = this.getAttribute('data-name');
       });
     });
 
-    // Prevent submit if location is missing
-    document.getElementById('attendanceForm').addEventListener('submit', function(e) {
+    // Prevent double submission
+    document.getElementById('attendanceForm').addEventListener('submit', function (e) {
       const lat = document.getElementById("latitude").value;
       const lon = document.getElementById("longitude").value;
       if (!lat || !lon) {
         e.preventDefault();
         alert("Location access is required to submit attendance.");
+        return;
       }
+
+      localStorage.setItem(localStorageKey, "true");
     });
   </script>
 </body>

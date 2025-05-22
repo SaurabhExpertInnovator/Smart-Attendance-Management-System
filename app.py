@@ -1,5 +1,5 @@
-# Updated app.py with IP-based and roll-name pair restriction
-from flask import Flask, render_template, request, redirect, url_for, send_file
+# Updated app.py with strong device restriction using IP + session cookie
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, make_response
 import pandas as pd
 import qrcode
 import uuid
@@ -10,6 +10,7 @@ from pytz import timezone
 import math
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)  # For securely storing sessions
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
@@ -21,20 +22,18 @@ os.makedirs(qr_folder, exist_ok=True)
 
 sessions = {}  # session_id -> session details
 attendance = {}  # session_id -> list of marked entries
+used_devices = {}  # session_id -> set of unique IP/session keys
 
-# ✅ Use Render public URL instead of localhost
 BASE_URL = 'https://attendance-system-project.onrender.com/'
 
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371000  # Earth radius in meters
+    R = 6371000
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     d_phi = math.radians(lat2 - lat1)
     d_lambda = math.radians(lon2 - lon1)
-
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return R * c
 
 @app.route('/')
@@ -71,9 +70,10 @@ def upload():
             'radius': radius
         }
 
+        used_devices[session_id] = set()
+
         url = BASE_URL + 'scan/' + session_id
         qr = qrcode.make(url)
-
         qr_path = os.path.join(qr_folder, session_id + '.png')
         qr.save(qr_path)
 
@@ -83,14 +83,18 @@ def upload():
 
 @app.route('/scan/<session_id>')
 def scan(session_id):
-    session = sessions.get(session_id)
-    if not session:
+    session_data = sessions.get(session_id)
+    if not session_data:
         return 'Invalid session ID.'
 
-    df = pd.read_csv(session['filename'])
+    df = pd.read_csv(session_data['filename'])
     students = df.to_dict(orient='records')
     roll_col = df.columns[0]
     name_col = df.columns[1]
+
+    # Assign a unique session key if not already
+    if 'user_token' not in session:
+        session['user_token'] = str(uuid.uuid4())
 
     return render_template('student_list.html', students=students, session_id=session_id, roll_col=roll_col, name_col=name_col)
 
@@ -102,6 +106,7 @@ def mark_attendance():
     lat = request.form.get('latitude')
     lon = request.form.get('longitude')
     ip_address = request.remote_addr
+    device_token = session.get('user_token')
 
     if not lat or not lon:
         return 'Location access is required to mark attendance.'
@@ -112,20 +117,27 @@ def mark_attendance():
     except ValueError:
         return 'Invalid latitude or longitude.'
 
-    session = sessions.get(session_id)
-    if not session:
+    session_data = sessions.get(session_id)
+    if not session_data:
         return 'Invalid session.'
 
-    dist = haversine(lat, lon, session['latitude'], session['longitude'])
-    print(f"Distance from center: {dist:.2f} meters")
-    if dist > session['radius']:
+    dist = haversine(lat, lon, session_data['latitude'], session_data['longitude'])
+    if dist > session_data['radius']:
         return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.'
 
     if session_id not in attendance:
         attendance[session_id] = []
 
-    # ✅ Load student list to validate roll-name pair
-    df = pd.read_csv(session['filename'])
+    if session_id not in used_devices:
+        used_devices[session_id] = set()
+
+    # Unique device/session combination
+    device_key = f"{ip_address}_{device_token}"
+
+    if device_key in used_devices[session_id]:
+        return 'Attendance already submitted from this device.'
+
+    df = pd.read_csv(session_data['filename'])
     df.columns = df.columns.str.strip().str.lower()
     valid_pairs = {(str(row[df.columns[0]]).strip().lower(), str(row[df.columns[1]]).strip().lower()) for _, row in df.iterrows()}
 
@@ -135,8 +147,6 @@ def mark_attendance():
     for record in attendance[session_id]:
         if record['roll'] == roll:
             return 'Attendance already marked for this roll number.'
-        if record['ip'] == ip_address:
-            return 'Attendance already submitted from this device/IP.'
 
     india_time = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -146,6 +156,8 @@ def mark_attendance():
         'timestamp': india_time,
         'ip': ip_address
     })
+
+    used_devices[session_id].add(device_key)
 
     return 'Attendance marked successfully!'
 

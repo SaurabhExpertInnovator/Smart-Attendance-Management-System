@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, redirect, url_for, send_file, abort
 import pandas as pd
 import qrcode
 import uuid
@@ -103,43 +103,42 @@ def scan(session_id):
 
 @app.route('/mark', methods=['POST'])
 def mark_attendance():
-    session_id = request.form['session_id']
-    name = request.form['name']
-    roll = request.form['roll_number']
-    lat = request.form.get('latitude')
-    lon = request.form.get('longitude')
-    user_ip = request.remote_addr
+    try:
+        session_id = request.form['session_id']
+        roll = request.form['roll_number']
+        lat = request.form.get('latitude')
+        lon = request.form.get('longitude')
+        user_ip = request.remote_addr
+    except Exception as e:
+        return 'Invalid form data: {}'.format(str(e)), 400
 
-    if not lat or not lon:
-        return 'Location access is required to mark attendance.'
+    if not lat or not lon or not roll or not session_id:
+        return 'Missing required fields.', 400
 
     try:
         lat = float(lat)
         lon = float(lon)
     except ValueError:
-        return 'Invalid latitude or longitude.'
+        return 'Invalid latitude or longitude.', 400
 
     session = sessions.get(session_id)
     if not session:
-        return 'Invalid session.'
+        return 'Invalid session.', 400
 
     dist = haversine(lat, lon, session['latitude'], session['longitude'])
     if dist > session['radius']:
-        return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.'
+        return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.', 400
 
     if session_id not in attendance:
         attendance[session_id] = {'ips': {}, 'rolls': set()}
 
+    if roll in attendance[session_id]['rolls']:
+        return 'Attendance already marked for this student.', 400
+
     ip_roll_map = attendance[session_id]['ips']
-    rolls_marked = attendance[session_id]['rolls']
-
-    # 🚫 Block same IP for different student
-    if user_ip in ip_roll_map and ip_roll_map[user_ip] != roll:
-        return 'This device has already been used to mark attendance for a different student.'
-
-    # 🚫 Block same student multiple times
-    if roll in rolls_marked:
-        return 'Attendance already marked for this student.'
+    if user_ip in ip_roll_map:
+        if ip_roll_map[user_ip] != roll:
+            return 'This device has already been used to mark attendance for a different student.', 400
 
     df = pd.read_csv(session['filename'])
     today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
@@ -152,11 +151,11 @@ def mark_attendance():
         df.to_csv(session['filename'], index=False)
 
         attendance[session_id]['rolls'].add(roll)
-        attendance[session_id]['ips'][user_ip] = roll
+        ip_roll_map[user_ip] = roll
 
         return 'Attendance marked successfully!'
     else:
-        return 'Student not found in list.'
+        return 'Student not found in list.', 400
 
 @app.route('/download/<session_id>')
 def download(session_id):

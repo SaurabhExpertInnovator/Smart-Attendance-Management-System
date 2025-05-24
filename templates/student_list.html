@@ -2,112 +2,121 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Select Your Name</title>
+  <title>Mark Attendance</title>
   <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #e0f7fa;
-      padding: 30px;
-    }
-    h2 {
-      text-align: center;
-      color: #00796b;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-    }
-    th, td {
-      padding: 12px;
-      border: 1px solid #ccc;
-      text-align: center;
-    }
-    tr:hover {
-      background-color: #b2dfdb;
-    }
-    .submit-btn {
-      margin-top: 20px;
-      display: block;
-      padding: 10px 20px;
-      font-size: 16px;
-      background-color: #00796b;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .submit-btn:disabled {
-      background-color: #999;
-      cursor: not-allowed;
-    }
-    .note {
-      color: red;
-      font-weight: bold;
-      margin-top: 10px;
-      text-align: center;
-    }
+    /* Your existing styles here */
   </style>
 </head>
 <body>
-  <h2>Select Your Name and Roll Number</h2>
-  <div class="note" id="note">Fetching your location... Please allow location access.</div>
+  <h1>Select Your Name to Mark Attendance</h1>
 
-  <form id="attendanceForm" method="POST" action="/mark">
-    <input type="hidden" name="session_id" value="{{ session_id }}">
+  <form id="attendanceForm" method="post" action="/mark">
+    <input type="hidden" name="session_id" value="{{ session_id }}" />
     <input type="hidden" id="latitude" name="latitude" />
     <input type="hidden" id="longitude" name="longitude" />
 
-    <table>
-      <tr>
-        <th>Select</th>
-        <th>{{ roll_col }}</th>
-        <th>{{ name_col }}</th>
-      </tr>
+    <label for="studentSelect">Choose your name:</label>
+    <select id="studentSelect" name="roll_number" required>
+      <option value="">--Select--</option>
       {% for student in students %}
-      <tr>
-        <td>
-          <input type="radio" name="roll_number" value="{{ student[roll_col] }}" required
-                 data-name="{{ student[name_col] }}">
-        </td>
-        <td>{{ student[roll_col] }}</td>
-        <td>{{ student[name_col] }}</td>
-      </tr>
+        <option value="{{ student[roll_col] }}" data-name="{{ student[name_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
       {% endfor %}
-    </table>
+    </select>
 
-    <input type="hidden" name="name" id="student_name" />
-    <button type="submit" class="submit-btn" id="submitBtn" disabled>Submit Attendance</button>
+    <button type="submit">Mark Attendance</button>
   </form>
 
+  <div id="message" style="color:red; margin-top:10px;"></div>
+
   <script>
-    // On load, try to get location
-    window.onload = function() {
+    const attendanceForm = document.getElementById('attendanceForm');
+    const studentSelect = document.getElementById('studentSelect');
+    const messageDiv = document.getElementById('message');
+
+    // Get location and fill hidden inputs
+    window.onload = () => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-          function(position) {
-            document.getElementById("latitude").value = position.coords.latitude;
-            document.getElementById("longitude").value = position.coords.longitude;
-            document.getElementById("note").style.display = "none";
-            document.getElementById("submitBtn").disabled = false;
+          (position) => {
+            document.getElementById('latitude').value = position.coords.latitude.toFixed(6);
+            document.getElementById('longitude').value = position.coords.longitude.toFixed(6);
           },
-          function(error) {
-            document.getElementById("note").innerText = "Location access denied or unavailable. Attendance cannot be marked.";
-            alert("Please allow location access and refresh the page to mark attendance.");
-            document.getElementById("submitBtn").disabled = true;
+          () => {
+            messageDiv.textContent = 'Location access is required to mark attendance.';
           }
         );
       } else {
-        alert("Geolocation is not supported by your browser.");
-        document.getElementById("note").innerText = "Geolocation is not supported by your browser.";
-        document.getElementById("submitBtn").disabled = true;
+        messageDiv.textContent = 'Geolocation is not supported by your browser.';
       }
     };
 
-    // Update hidden name field when a student is selected
-    document.querySelectorAll('input[name="roll_number"]').forEach(radio => {
-      radio.addEventListener('change', function() {
-        document.getElementById('student_name').value = this.getAttribute('data-name');
+    attendanceForm.addEventListener('submit', function(event) {
+      event.preventDefault();
+
+      const selectedOption = studentSelect.options[studentSelect.selectedIndex];
+      const selectedRoll = selectedOption.value;
+
+      if (!selectedRoll) {
+        messageDiv.textContent = 'Please select your name.';
+        return;
+      }
+
+      // Retrieve attendance info from localStorage
+      const storedData = JSON.parse(localStorage.getItem('attendanceData')) || {};
+      const sessionId = "{{ session_id }}";
+
+      if (!storedData[sessionId]) {
+        storedData[sessionId] = { deviceRoll: null };
+      }
+
+      const sessionData = storedData[sessionId];
+
+      // Check if this device already marked attendance for a different student
+      if (sessionData.deviceRoll && sessionData.deviceRoll !== selectedRoll) {
+        messageDiv.textContent = 'This device has already been used to mark attendance for a different student.';
+        return;
+      }
+
+      // Check if this device already marked attendance for this student
+      if (sessionData.deviceRoll === selectedRoll) {
+        messageDiv.textContent = 'Attendance already marked for this student on this device.';
+        return;
+      }
+
+      // Check if location is available
+      if (!document.getElementById('latitude').value || !document.getElementById('longitude').value) {
+        messageDiv.textContent = 'Waiting for location. Please allow location access.';
+        return;
+      }
+
+      // Clear previous messages
+      messageDiv.textContent = '';
+
+      // Submit attendance using fetch API
+      const formData = new FormData(attendanceForm);
+
+      fetch('/mark', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.text())
+      .then(text => {
+        if (text === 'Attendance marked successfully!') {
+          messageDiv.style.color = 'green';
+
+          // Save in localStorage that this device marked attendance for this roll
+          sessionData.deviceRoll = selectedRoll;
+          localStorage.setItem('attendanceData', JSON.stringify(storedData));
+
+          messageDiv.textContent = text;
+        } else {
+          messageDiv.style.color = 'red';
+          messageDiv.textContent = text;
+        }
+      })
+      .catch(() => {
+        messageDiv.style.color = 'red';
+        messageDiv.textContent = 'Error marking attendance. Please try again.';
       });
     });
   </script>

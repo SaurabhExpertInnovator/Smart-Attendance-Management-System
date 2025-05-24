@@ -1,147 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Mark Attendance</title>
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f9faff;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f0f8ff;
+      margin: 0;
+      padding: 0;
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
-      margin: 0;
+      height: 100vh;
     }
+
     .container {
-      background: white;
-      padding: 30px 40px;
-      border-radius: 12px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-      width: 350px;
+      background-color: #ffffff;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      width: 90%;
+      max-width: 500px;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: #003366;
       text-align: center;
     }
-    h2 {
-      color: #003366;
-      margin-bottom: 25px;
+
+    label {
+      font-weight: 600;
+      display: block;
+      margin-top: 15px;
     }
-    select {
+
+    select, input[type="hidden"], button {
       width: 100%;
-      padding: 12px;
-      border-radius: 6px;
+      padding: 10px;
+      margin-top: 8px;
+      border-radius: 5px;
       border: 1px solid #ccc;
       font-size: 16px;
-      margin-bottom: 20px;
     }
+
     button {
-      width: 100%;
       background-color: #007bff;
       color: white;
-      padding: 12px;
-      font-size: 18px;
       border: none;
-      border-radius: 6px;
+      margin-top: 20px;
       cursor: pointer;
-      transition: background-color 0.3s ease;
     }
+
     button:hover {
       background-color: #0056b3;
     }
-    #location-status {
-      margin-bottom: 15px;
+
+    .message {
+      margin-top: 15px;
       font-size: 14px;
-      color: #e60000;
-      min-height: 18px;
+      color: #d00;
+      text-align: center;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h2>Mark Your Attendance</h2>
-    <div id="location-status">Detecting location...</div>
-    <form id="attendanceForm" method="post" action="/mark" enctype="multipart/form-data">
-      <input type="hidden" name="session_id" value="{{ session_id }}" />
-      <input type="hidden" id="latitude" name="latitude" />
-      <input type="hidden" id="longitude" name="longitude" />
-
-      <select id="studentSelect" name="roll_number" required>
-        <option value="" disabled selected>-- Select your name --</option>
+    <form id="attendanceForm" method="POST" action="/mark" onsubmit="return validateAndSubmit();">
+      <label for="roll_number">Select your name and roll number:</label>
+      <select name="roll_number" id="roll_number" required>
+        <option value="">-- Select --</option>
         {% for student in students %}
-          <option value="{{ student[roll_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
+          <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
         {% endfor %}
       </select>
 
-      <button type="submit">Mark Attendance</button>
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <input type="hidden" id="latitude" name="latitude">
+      <input type="hidden" id="longitude" name="longitude">
+
+      <div class="message" id="location-status">Fetching location...</div>
+      <button type="submit">Submit Attendance</button>
     </form>
   </div>
 
   <script>
-    const latitudeInput = document.getElementById('latitude');
-    const longitudeInput = document.getElementById('longitude');
+    const latInput = document.getElementById('latitude');
+    const lonInput = document.getElementById('longitude');
     const locationStatus = document.getElementById('location-status');
-    const attendanceForm = document.getElementById('attendanceForm');
-    const studentSelect = document.getElementById('studentSelect');
 
-    function setLocationStatus(msg, isError = false) {
-      locationStatus.textContent = msg;
-      locationStatus.style.color = isError ? '#e60000' : '#006600';
+    function validateAndSubmit() {
+      if (!latInput.value || !lonInput.value) {
+        alert("Location not available. Please allow location access and reload the page.");
+        return false;
+      }
+      return true;
     }
 
-    window.onload = () => {
+    window.onload = function () {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-          (position) => {
-            latitudeInput.value = position.coords.latitude.toFixed(6);
-            longitudeInput.value = position.coords.longitude.toFixed(6);
-            setLocationStatus('Location detected automatically.');
+          function (position) {
+            latInput.value = position.coords.latitude;
+            lonInput.value = position.coords.longitude;
+            locationStatus.textContent = "Location detected successfully.";
+            locationStatus.style.color = "green";
           },
-          (error) => {
-            setLocationStatus('Location access denied or unavailable. Please allow location access and reload.', true);
+          function (error) {
+            locationStatus.textContent = "Failed to get location. Please enable location access.";
+            locationStatus.style.color = "red";
           },
           { timeout: 10000 }
         );
       } else {
-        setLocationStatus('Geolocation is not supported by your browser.', true);
+        locationStatus.textContent = "Geolocation is not supported by this browser.";
+        locationStatus.style.color = "red";
       }
     };
-
-    attendanceForm.addEventListener('submit', function(event) {
-      event.preventDefault();
-
-      const lat = latitudeInput.value;
-      const lon = longitudeInput.value;
-      const roll = studentSelect.value;
-      const sessionId = this.session_id.value;
-
-      if (!lat || !lon) {
-        alert('Location access is required to mark attendance. Please allow location and reload the page.');
-        return;
-      }
-      if (!roll) {
-        alert('Please select your name from the list.');
-        return;
-      }
-
-      const formData = new FormData(attendanceForm);
-
-      fetch('/mark', {
-        method: 'POST',
-        body: formData
-        // Do NOT set Content-Type header manually!
-      })
-      .then(response => response.text())
-      .then(text => {
-        alert(text);
-        if (text.toLowerCase().includes('success')) {
-          // Optionally disable form after success to prevent re-submission
-          attendanceForm.querySelector('button').disabled = true;
-          studentSelect.disabled = true;
-        }
-      })
-      .catch(error => {
-        alert('Error submitting attendance: ' + error);
-      });
-    });
   </script>
 </body>
 </html>

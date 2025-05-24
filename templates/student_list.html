@@ -6,172 +6,140 @@
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #f4f7fa;
+      background-color: #f9faff;
       display: flex;
-      flex-direction: column;
+      justify-content: center;
       align-items: center;
-      padding: 30px;
-      margin: 0;
       min-height: 100vh;
+      margin: 0;
     }
-    h1 {
-      color: #003366;
-      margin-bottom: 20px;
-    }
-    form {
+    .container {
       background: white;
-      padding: 25px 30px;
-      border-radius: 10px;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-      width: 100%;
-      max-width: 400px;
+      padding: 30px 40px;
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+      width: 350px;
+      text-align: center;
     }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #555;
+    h2 {
+      color: #003366;
+      margin-bottom: 25px;
     }
-    select, button {
+    select {
       width: 100%;
       padding: 12px;
-      margin-bottom: 15px;
       border-radius: 6px;
       border: 1px solid #ccc;
       font-size: 16px;
-      box-sizing: border-box;
-    }
-    select:focus, button:focus {
-      outline: none;
-      border-color: #007bff;
-      box-shadow: 0 0 5px #007bff;
+      margin-bottom: 20px;
     }
     button {
+      width: 100%;
       background-color: #007bff;
       color: white;
+      padding: 12px;
+      font-size: 18px;
       border: none;
+      border-radius: 6px;
       cursor: pointer;
-      font-weight: 600;
       transition: background-color 0.3s ease;
     }
     button:hover {
       background-color: #0056b3;
     }
-    #message {
-      min-height: 20px;
-      font-weight: 600;
-      margin-top: 10px;
-      color: red;
-      text-align: center;
+    #location-status {
+      margin-bottom: 15px;
+      font-size: 14px;
+      color: #e60000;
+      min-height: 18px;
     }
   </style>
 </head>
 <body>
-  <h1>Mark Your Attendance</h1>
+  <div class="container">
+    <h2>Mark Your Attendance</h2>
+    <div id="location-status">Detecting location...</div>
+    <form id="attendanceForm" method="post" action="/mark" enctype="multipart/form-data">
+      <input type="hidden" name="session_id" value="{{ session_id }}" />
+      <input type="hidden" id="latitude" name="latitude" />
+      <input type="hidden" id="longitude" name="longitude" />
 
-  <form id="attendanceForm" method="post" action="/mark">
-    <input type="hidden" name="session_id" value="{{ session_id }}" />
-    <input type="hidden" id="latitude" name="latitude" />
-    <input type="hidden" id="longitude" name="longitude" />
+      <select id="studentSelect" name="roll_number" required>
+        <option value="" disabled selected>-- Select your name --</option>
+        {% for student in students %}
+          <option value="{{ student[roll_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
+        {% endfor %}
+      </select>
 
-    <label for="studentSelect">Select your name:</label>
-    <select id="studentSelect" name="roll_number" required>
-      <option value="" disabled selected>-- Select your name --</option>
-      {% for student in students %}
-        <option value="{{ student[roll_col] }}" data-name="{{ student[name_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
-      {% endfor %}
-    </select>
-
-    <button type="submit">Mark Attendance</button>
-  </form>
-
-  <div id="message"></div>
+      <button type="submit">Mark Attendance</button>
+    </form>
+  </div>
 
   <script>
+    const latitudeInput = document.getElementById('latitude');
+    const longitudeInput = document.getElementById('longitude');
+    const locationStatus = document.getElementById('location-status');
     const attendanceForm = document.getElementById('attendanceForm');
     const studentSelect = document.getElementById('studentSelect');
-    const messageDiv = document.getElementById('message');
 
-    // Get location and fill hidden inputs
+    function setLocationStatus(msg, isError = false) {
+      locationStatus.textContent = msg;
+      locationStatus.style.color = isError ? '#e60000' : '#006600';
+    }
+
     window.onload = () => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
-            document.getElementById('latitude').value = position.coords.latitude.toFixed(6);
-            document.getElementById('longitude').value = position.coords.longitude.toFixed(6);
+            latitudeInput.value = position.coords.latitude.toFixed(6);
+            longitudeInput.value = position.coords.longitude.toFixed(6);
+            setLocationStatus('Location detected automatically.');
           },
-          () => {
-            messageDiv.textContent = 'Location access is required to mark attendance.';
-          }
+          (error) => {
+            setLocationStatus('Location access denied or unavailable. Please allow location access and reload.', true);
+          },
+          { timeout: 10000 }
         );
       } else {
-        messageDiv.textContent = 'Geolocation is not supported by your browser.';
+        setLocationStatus('Geolocation is not supported by your browser.', true);
       }
     };
 
     attendanceForm.addEventListener('submit', function(event) {
       event.preventDefault();
 
-      const selectedRoll = studentSelect.value;
+      const lat = latitudeInput.value;
+      const lon = longitudeInput.value;
+      const roll = studentSelect.value;
+      const sessionId = this.session_id.value;
 
-      if (!selectedRoll) {
-        messageDiv.textContent = 'Please select your name.';
+      if (!lat || !lon) {
+        alert('Location access is required to mark attendance. Please allow location and reload the page.');
         return;
       }
-
-      // Retrieve attendance info from localStorage
-      const storedData = JSON.parse(localStorage.getItem('attendanceData')) || {};
-      const sessionId = "{{ session_id }}";
-
-      if (!storedData[sessionId]) {
-        storedData[sessionId] = { deviceRoll: null };
-      }
-
-      const sessionData = storedData[sessionId];
-
-      // Check if this device already marked attendance for a different student
-      if (sessionData.deviceRoll && sessionData.deviceRoll !== selectedRoll) {
-        messageDiv.textContent = 'This device has already been used to mark attendance for a different student.';
+      if (!roll) {
+        alert('Please select your name from the list.');
         return;
       }
-
-      // Check if this device already marked attendance for this student
-      if (sessionData.deviceRoll === selectedRoll) {
-        messageDiv.textContent = 'Attendance already marked for this student on this device.';
-        return;
-      }
-
-      if (!document.getElementById('latitude').value || !document.getElementById('longitude').value) {
-        messageDiv.textContent = 'Waiting for location. Please allow location access.';
-        return;
-      }
-
-      messageDiv.textContent = '';
 
       const formData = new FormData(attendanceForm);
 
       fetch('/mark', {
         method: 'POST',
-        body: formData,
-        headers: {
-          'Accept': 'text/plain'
-        }
+        body: formData
+        // Do NOT set Content-Type header manually!
       })
       .then(response => response.text())
       .then(text => {
-        if (text === 'Attendance marked successfully!') {
-          messageDiv.style.color = 'green';
-          sessionData.deviceRoll = selectedRoll;
-          localStorage.setItem('attendanceData', JSON.stringify(storedData));
-          messageDiv.textContent = text;
-        } else {
-          messageDiv.style.color = 'red';
-          messageDiv.textContent = text;
+        alert(text);
+        if (text.toLowerCase().includes('success')) {
+          // Optionally disable form after success to prevent re-submission
+          attendanceForm.querySelector('button').disabled = true;
+          studentSelect.disabled = true;
         }
       })
-      .catch(() => {
-        messageDiv.style.color = 'red';
-        messageDiv.textContent = 'Error marking attendance. Please try again.';
+      .catch(error => {
+        alert('Error submitting attendance: ' + error);
       });
     });
   </script>

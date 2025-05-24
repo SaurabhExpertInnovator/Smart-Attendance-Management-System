@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>Mark Attendance</title>
   <style>
-    /* Your existing styles here */
+    /* Your existing CSS */
   </style>
 </head>
 <body>
@@ -55,6 +55,7 @@
 
       const selectedOption = studentSelect.options[studentSelect.selectedIndex];
       const selectedRoll = selectedOption.value;
+      const selectedName = selectedOption.getAttribute('data-name');
 
       if (!selectedRoll) {
         messageDiv.textContent = 'Please select your name.';
@@ -63,61 +64,64 @@
 
       // Retrieve attendance info from localStorage
       const storedData = JSON.parse(localStorage.getItem('attendanceData')) || {};
+      // Format: { session_id: { ips: {ip: roll}, rolls: [rolls_marked] } }
+      // But here we'll just store rollsMarked and deviceRoll per session
+
       const sessionId = "{{ session_id }}";
 
       if (!storedData[sessionId]) {
-        storedData[sessionId] = { deviceRoll: null };
+        storedData[sessionId] = { rollsMarked: [], deviceRoll: null };
       }
 
       const sessionData = storedData[sessionId];
 
-      // Check if this device already marked attendance for a different student
+      // If this device already marked attendance for a different roll
       if (sessionData.deviceRoll && sessionData.deviceRoll !== selectedRoll) {
         messageDiv.textContent = 'This device has already been used to mark attendance for a different student.';
         return;
       }
 
-      // Check if this device already marked attendance for this student
-      if (sessionData.deviceRoll === selectedRoll) {
+      // If this roll already marked attendance from this device
+      if (sessionData.rollsMarked.includes(selectedRoll)) {
         messageDiv.textContent = 'Attendance already marked for this student on this device.';
         return;
       }
 
-      // Check if location is available
+      // If location not yet set
       if (!document.getElementById('latitude').value || !document.getElementById('longitude').value) {
         messageDiv.textContent = 'Waiting for location. Please allow location access.';
         return;
       }
 
-      // Clear previous messages
+      // Clear previous message
       messageDiv.textContent = '';
 
-      // Submit attendance using fetch API
+      // Submit via fetch API for async response and update localStorage accordingly
       const formData = new FormData(attendanceForm);
 
       fetch('/mark', {
         method: 'POST',
         body: formData
-      })
-      .then(response => response.text())
-      .then(text => {
-        if (text === 'Attendance marked successfully!') {
-          messageDiv.style.color = 'green';
+      }).then(response => response.text())
+        .then(text => {
+          if (text === 'Attendance marked successfully!') {
+            messageDiv.style.color = 'green';
 
-          // Save in localStorage that this device marked attendance for this roll
-          sessionData.deviceRoll = selectedRoll;
-          localStorage.setItem('attendanceData', JSON.stringify(storedData));
+            // Update localStorage to block further marking for this device/session
+            sessionData.rollsMarked.push(selectedRoll);
+            sessionData.deviceRoll = selectedRoll;
+            localStorage.setItem('attendanceData', JSON.stringify(storedData));
 
-          messageDiv.textContent = text;
-        } else {
+            messageDiv.textContent = text;
+          } else {
+            messageDiv.style.color = 'red';
+            messageDiv.textContent = text;
+          }
+        })
+        .catch(() => {
           messageDiv.style.color = 'red';
-          messageDiv.textContent = text;
-        }
-      })
-      .catch(() => {
-        messageDiv.style.color = 'red';
-        messageDiv.textContent = 'Error marking attendance. Please try again.';
-      });
+          messageDiv.textContent = 'Error marking attendance. Please try again.';
+        });
     });
   </script>
 </body>

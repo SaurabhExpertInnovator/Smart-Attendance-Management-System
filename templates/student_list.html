@@ -4,20 +4,79 @@
   <meta charset="UTF-8" />
   <title>Mark Attendance</title>
   <style>
-    /* Your existing CSS */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f4f7fa;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px;
+      margin: 0;
+      min-height: 100vh;
+    }
+    h1 {
+      color: #003366;
+      margin-bottom: 20px;
+    }
+    form {
+      background: white;
+      padding: 25px 30px;
+      border-radius: 10px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+      width: 100%;
+      max-width: 400px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #555;
+    }
+    select, button {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    select:focus, button:focus {
+      outline: none;
+      border-color: #007bff;
+      box-shadow: 0 0 5px #007bff;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #message {
+      min-height: 20px;
+      font-weight: 600;
+      margin-top: 10px;
+      color: red;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <h1>Select Your Name to Mark Attendance</h1>
+  <h1>Mark Your Attendance</h1>
 
   <form id="attendanceForm" method="post" action="/mark">
     <input type="hidden" name="session_id" value="{{ session_id }}" />
     <input type="hidden" id="latitude" name="latitude" />
     <input type="hidden" id="longitude" name="longitude" />
 
-    <label for="studentSelect">Choose your name:</label>
+    <label for="studentSelect">Select your name:</label>
     <select id="studentSelect" name="roll_number" required>
-      <option value="">--Select--</option>
+      <option value="" disabled selected>-- Select your name --</option>
       {% for student in students %}
         <option value="{{ student[roll_col] }}" data-name="{{ student[name_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
       {% endfor %}
@@ -26,7 +85,7 @@
     <button type="submit">Mark Attendance</button>
   </form>
 
-  <div id="message" style="color:red; margin-top:10px;"></div>
+  <div id="message"></div>
 
   <script>
     const attendanceForm = document.getElementById('attendanceForm');
@@ -53,9 +112,7 @@
     attendanceForm.addEventListener('submit', function(event) {
       event.preventDefault();
 
-      const selectedOption = studentSelect.options[studentSelect.selectedIndex];
-      const selectedRoll = selectedOption.value;
-      const selectedName = selectedOption.getAttribute('data-name');
+      const selectedRoll = studentSelect.value;
 
       if (!selectedRoll) {
         messageDiv.textContent = 'Please select your name.';
@@ -64,64 +121,58 @@
 
       // Retrieve attendance info from localStorage
       const storedData = JSON.parse(localStorage.getItem('attendanceData')) || {};
-      // Format: { session_id: { ips: {ip: roll}, rolls: [rolls_marked] } }
-      // But here we'll just store rollsMarked and deviceRoll per session
-
       const sessionId = "{{ session_id }}";
 
       if (!storedData[sessionId]) {
-        storedData[sessionId] = { rollsMarked: [], deviceRoll: null };
+        storedData[sessionId] = { deviceRoll: null };
       }
 
       const sessionData = storedData[sessionId];
 
-      // If this device already marked attendance for a different roll
+      // Check if this device already marked attendance for a different student
       if (sessionData.deviceRoll && sessionData.deviceRoll !== selectedRoll) {
         messageDiv.textContent = 'This device has already been used to mark attendance for a different student.';
         return;
       }
 
-      // If this roll already marked attendance from this device
-      if (sessionData.rollsMarked.includes(selectedRoll)) {
+      // Check if this device already marked attendance for this student
+      if (sessionData.deviceRoll === selectedRoll) {
         messageDiv.textContent = 'Attendance already marked for this student on this device.';
         return;
       }
 
-      // If location not yet set
       if (!document.getElementById('latitude').value || !document.getElementById('longitude').value) {
         messageDiv.textContent = 'Waiting for location. Please allow location access.';
         return;
       }
 
-      // Clear previous message
       messageDiv.textContent = '';
 
-      // Submit via fetch API for async response and update localStorage accordingly
       const formData = new FormData(attendanceForm);
 
       fetch('/mark', {
         method: 'POST',
-        body: formData
-      }).then(response => response.text())
-        .then(text => {
-          if (text === 'Attendance marked successfully!') {
-            messageDiv.style.color = 'green';
-
-            // Update localStorage to block further marking for this device/session
-            sessionData.rollsMarked.push(selectedRoll);
-            sessionData.deviceRoll = selectedRoll;
-            localStorage.setItem('attendanceData', JSON.stringify(storedData));
-
-            messageDiv.textContent = text;
-          } else {
-            messageDiv.style.color = 'red';
-            messageDiv.textContent = text;
-          }
-        })
-        .catch(() => {
+        body: formData,
+        headers: {
+          'Accept': 'text/plain'
+        }
+      })
+      .then(response => response.text())
+      .then(text => {
+        if (text === 'Attendance marked successfully!') {
+          messageDiv.style.color = 'green';
+          sessionData.deviceRoll = selectedRoll;
+          localStorage.setItem('attendanceData', JSON.stringify(storedData));
+          messageDiv.textContent = text;
+        } else {
           messageDiv.style.color = 'red';
-          messageDiv.textContent = 'Error marking attendance. Please try again.';
-        });
+          messageDiv.textContent = text;
+        }
+      })
+      .catch(() => {
+        messageDiv.style.color = 'red';
+        messageDiv.textContent = 'Error marking attendance. Please try again.';
+      });
     });
   </script>
 </body>

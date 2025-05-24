@@ -1,153 +1,181 @@
-from flask import Flask, render_template, request, redirect, send_file, session, url_for
-from werkzeug.utils import secure_filename
-import os
+# app.py
+from flask import Flask, render_template, request, redirect, url_for, send_file, abort
 import pandas as pd
 import qrcode
 import uuid
+import os
 import json
 from datetime import datetime
-import io
+from io import BytesIO
 from pytz import timezone
-from math import radians, sin, cos, sqrt, atan2
+import math
 
 app = Flask(__name__)
-app.secret_key = 'secret_key'
-UPLOAD_FOLDER = 'uploads'
-QR_FOLDER = 'static/qr'
+app.config['UPLOAD_FOLDER'] = 'uploads'
 SESSIONS_FILE = 'sessions.json'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['QR_FOLDER'] = QR_FOLDER
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-if not os.path.exists(QR_FOLDER):
-    os.makedirs(QR_FOLDER)
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
 
-# Load existing sessions
+qr_folder = os.path.join('static', 'qr')
+os.makedirs(qr_folder, exist_ok=True)
+
+attendance = {}  # session_id -> {devices: {device_id: roll}, rolls: set()}
+BASE_URL = 'https://smart-attendance-management-system-tavt.onrender.com/'
+
+# Load sessions from file
 if os.path.exists(SESSIONS_FILE):
     with open(SESSIONS_FILE, 'r') as f:
-        attendance_sessions = json.load(f)
+        sessions = json.load(f)
 else:
-    attendance_sessions = {}
+    sessions = {}
 
 def save_sessions():
     with open(SESSIONS_FILE, 'w') as f:
-        json.dump(attendance_sessions, f)
+        json.dump(sessions, f)
 
-def is_within_radius(lat1, lon1, lat2, lon2, radius):
+def haversine(lat1, lon1, lat2, lon2):
     R = 6371000
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    distance = R * c
-    return distance <= radius
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
-def upload_file():
+def upload():
     file = request.files['file']
-    radius = request.form['radius']
-    latitude = request.form['latitude']
-    longitude = request.form['longitude']
+    radius = request.form.get('radius')
+    latitude = request.form.get('latitude')
+    longitude = request.form.get('longitude')
+
+    if not latitude or not longitude or not radius:
+        return 'Location and radius are required.'
+
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+        radius = float(radius)
+    except ValueError:
+        return 'Invalid location or radius values.'
 
     if file:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-
-        df = pd.read_csv(filepath)
-        if 'Name' not in df.columns or 'Roll' not in df.columns:
-            return 'CSV must have Name and Roll columns'
-
+        df = pd.read_csv(file)
         session_id = str(uuid.uuid4())
-        qr_data = url_for('scan_qr', session_id=session_id, _external=True)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id + '.csv')
+        df.to_csv(filepath, index=False)
 
-        img = qrcode.make(qr_data)
-        qr_path = os.path.join(app.config['QR_FOLDER'], f'{session_id}.png')
-        img.save(qr_path)
-
-        attendance_sessions[session_id] = {
-            'filepath': filepath,
-            'latitude': float(latitude),
-            'longitude': float(longitude),
-            'radius': float(radius),
-            'marked_devices': {},  # device_id -> roll
-            'marked_rolls': [],    # list of roll numbers
-            'timestamp': datetime.now(timezone('Asia/Kolkata')).isoformat()
+        sessions[session_id] = {
+            'filename': filepath,
+            'latitude': latitude,
+            'longitude': longitude,
+            'radius': radius
         }
         save_sessions()
 
-        return render_template('qr_display.html', qr_path=qr_path, session_id=session_id)
-    return 'No file uploaded'
+        url = BASE_URL + 'scan/' + session_id
+        qr = qrcode.make(url)
+        qr_path = os.path.join(qr_folder, session_id + '.png')
+        qr.save(qr_path)
+
+        return render_template('qr_display.html', qr_path='qr/' + session_id + '.png', session_id=session_id)
+    else:
+        return 'File not uploaded.'
 
 @app.route('/scan/<session_id>')
-def scan_qr(session_id):
-    session_data = attendance_sessions.get(session_id)
-    if not session_data:
-        return 'Invalid session ID'
+def scan(session_id):
+    session = sessions.get(session_id)
+    if not session:
+        return 'Invalid session ID.'
 
-    df = pd.read_csv(session_data['filepath'])
-    return render_template('student_list.html', students=df.to_dict('records'),
-                           roll_col='Roll', name_col='Name', session_id=session_id)
+    df = pd.read_csv(session['filename'])
+    students = df.to_dict(orient='records')
+    roll_col = df.columns[0]
+    name_col = df.columns[1]
+
+    return render_template('student_list.html', students=students, session_id=session_id, roll_col=roll_col, name_col=name_col)
 
 @app.route('/mark', methods=['POST'])
 def mark_attendance():
-    session_id = request.form['session_id']
-    roll_number = request.form['roll_number']
-    latitude = float(request.form['latitude'])
-    longitude = float(request.form['longitude'])
-    device_id = request.form['device_id']
+    try:
+        session_id = request.form['session_id']
+        roll = request.form['roll_number']
+        lat = request.form.get('latitude')
+        lon = request.form.get('longitude')
+        device_id = request.form.get('device_id')
+    except Exception as e:
+        return 'Invalid form data: {}'.format(str(e)), 400
 
-    session_data = attendance_sessions.get(session_id)
-    if not session_data:
-        return 'Invalid session ID'
+    if not lat or not lon or not roll or not session_id or not device_id:
+        return 'Missing required fields.', 400
 
-    if not is_within_radius(latitude, longitude, session_data['latitude'], session_data['longitude'], session_data['radius']):
-        return 'You are outside the allowed location radius.'
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except ValueError:
+        return 'Invalid latitude or longitude.', 400
 
-    # Check device and roll logic
-    if device_id in session_data['marked_devices']:
-        return 'This device has already marked attendance.'
+    session = sessions.get(session_id)
+    if not session:
+        return 'Invalid session.', 400
 
-    if roll_number in session_data['marked_rolls']:
-        return 'This student has already marked attendance.'
+    dist = haversine(lat, lon, session['latitude'], session['longitude'])
+    if dist > session['radius']:
+        return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.', 400
 
-    # Mark attendance
-    session_data['marked_devices'][device_id] = roll_number
-    session_data['marked_rolls'].append(roll_number)
+    if session_id not in attendance:
+        attendance[session_id] = {'devices': {}, 'rolls': set()}
 
-    df = pd.read_csv(session_data['filepath'])
-    date_col = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
-    if date_col not in df.columns:
-        df[date_col] = 0
+    device_map = attendance[session_id]['devices']
+    if device_id in device_map and device_map[device_id] != roll:
+        return 'This device has already been used to mark attendance for another student.', 400
 
-    df.loc[df['Roll'] == roll_number, date_col] = 1
-    df.to_csv(session_data['filepath'], index=False)
-    save_sessions()
+    if roll in attendance[session_id]['rolls']:
+        return 'Attendance already marked for this student.', 400
 
-    return 'Attendance marked successfully!'
+    df = pd.read_csv(session['filename'])
+    today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
+    if today not in df.columns:
+        df[today] = 0
+
+    row_mask = df[df[df.columns[0]].astype(str) == roll]
+    if not row_mask.empty:
+        df.loc[df[df.columns[0]].astype(str) == roll, today] = 1
+        attendance[session_id]['rolls'].add(roll)
+        attendance[session_id]['devices'][device_id] = roll
+
+        df.to_csv(session['filename'], index=False)
+        return 'Attendance marked successfully!'
+    else:
+        return 'Student not found in list.', 400
 
 @app.route('/download/<session_id>')
-def download_file(session_id):
-    session_data = attendance_sessions.get(session_id)
-    if not session_data:
-        return 'Invalid session ID'
+def download(session_id):
+    session = sessions.get(session_id)
+    if not session:
+        return 'Invalid session ID.'
 
-    df = pd.read_csv(session_data['filepath'])
-    date_col = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
-    if date_col not in df.columns:
-        df[date_col] = 0
+    df = pd.read_csv(session['filename'])
+    today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
+    if today not in df.columns:
+        df[today] = 0
 
-    marked_rolls = set(session_data['marked_rolls'])
-    for idx in df.index:
-        if df.at[idx, 'Roll'] not in marked_rolls:
-            df.at[idx, date_col] = 0
+    if session_id in attendance:
+        marked_rolls = attendance[session_id]['rolls']
+        for idx in df.index:
+            roll = str(df.loc[idx, df.columns[0]])
+            if roll not in marked_rolls:
+                df.at[idx, today] = 0
 
-    output = io.BytesIO()
+    df.to_csv(session['filename'], index=False)
+
+    output = BytesIO()
     df.to_csv(output, index=False)
     output.seek(0)
     return send_file(output, mimetype='text/csv', as_attachment=True, download_name=f'attendance_{session_id}.csv')

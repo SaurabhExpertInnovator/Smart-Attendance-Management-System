@@ -132,16 +132,14 @@ def mark_attendance():
     if session_id not in attendance:
         attendance[session_id] = {'ips': {}, 'rolls': set()}
 
+    # Check if the IP is already used to mark for a different roll
     ip_map = attendance[session_id]['ips']
-    roll_set = attendance[session_id]['rolls']
-
-    # Check if this student has already marked attendance
-    if roll in roll_set:
-        return 'Attendance already marked for this student.', 400
-
-    # Check if the same IP was used for a different roll
     if user_ip in ip_map and ip_map[user_ip] != roll:
         return 'This device has already been used to mark attendance for another student.', 400
+
+    # Check if the roll has already marked attendance
+    if roll in attendance[session_id]['rolls']:
+        return 'Attendance already marked for this student.', 400
 
     df = pd.read_csv(session['filename'])
     today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
@@ -151,8 +149,8 @@ def mark_attendance():
     row_mask = df[df[df.columns[0]].astype(str) == roll]
     if not row_mask.empty:
         df.loc[df[df.columns[0]].astype(str) == roll, today] = 1
-        roll_set.add(roll)
-        ip_map[user_ip] = roll
+        attendance[session_id]['rolls'].add(roll)
+        attendance[session_id]['ips'][user_ip] = roll
 
         df.to_csv(session['filename'], index=False)
         return 'Attendance marked successfully!'

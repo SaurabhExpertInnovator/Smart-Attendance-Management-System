@@ -20,7 +20,7 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 qr_folder = os.path.join('static', 'qr')
 os.makedirs(qr_folder, exist_ok=True)
 
-attendance = {}  # session_id -> {ip: [rolls]}
+attendance = {}  # session_id -> {ip: [rolls], roll: True}
 BASE_URL = 'https://smart-attendance-management-system-tavt.onrender.com/'
 
 # Load sessions from file
@@ -128,9 +128,12 @@ def mark_attendance():
         return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.'
 
     if session_id not in attendance:
-        attendance[session_id] = {}
+        attendance[session_id] = {'ips': {}, 'rolls': set()}
 
-    if user_ip in attendance[session_id] and roll in attendance[session_id][user_ip]:
+    if roll in attendance[session_id]['rolls']:
+        return 'Attendance already marked for this student.'
+
+    if user_ip in attendance[session_id]['ips'] and roll in attendance[session_id]['ips'][user_ip]:
         return 'Attendance already marked from this device.'
 
     df = pd.read_csv(session['filename'])
@@ -143,9 +146,10 @@ def mark_attendance():
         df.loc[df[df.columns[0]] == roll, today] = 1
         df.to_csv(session['filename'], index=False)
 
-        if user_ip not in attendance[session_id]:
-            attendance[session_id][user_ip] = []
-        attendance[session_id][user_ip].append(roll)
+        attendance[session_id]['rolls'].add(roll)
+        if user_ip not in attendance[session_id]['ips']:
+            attendance[session_id]['ips'][user_ip] = []
+        attendance[session_id]['ips'][user_ip].append(roll)
 
         return 'Attendance marked successfully!'
     else:

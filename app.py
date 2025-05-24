@@ -20,7 +20,7 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 qr_folder = os.path.join('static', 'qr')
 os.makedirs(qr_folder, exist_ok=True)
 
-attendance = {}  # session_id -> {ips: {ip: roll}, rolls: set()}
+attendance = {}  # session_id -> {devices: {device_id: roll}, rolls: set()}
 BASE_URL = 'https://smart-attendance-management-system-tavt.onrender.com/'
 
 # Load sessions from file
@@ -108,11 +108,11 @@ def mark_attendance():
         roll = request.form['roll_number']
         lat = request.form.get('latitude')
         lon = request.form.get('longitude')
-        user_ip = request.remote_addr
+        device_id = request.form.get('device_id')
     except Exception as e:
         return 'Invalid form data: {}'.format(str(e)), 400
 
-    if not lat or not lon or not roll or not session_id:
+    if not lat or not lon or not roll or not session_id or not device_id:
         return 'Missing required fields.', 400
 
     try:
@@ -130,14 +130,12 @@ def mark_attendance():
         return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.', 400
 
     if session_id not in attendance:
-        attendance[session_id] = {'ips': {}, 'rolls': set()}
+        attendance[session_id] = {'devices': {}, 'rolls': set()}
 
-    # Check if the IP is already used to mark for a different roll
-    ip_map = attendance[session_id]['ips']
-    if user_ip in ip_map and ip_map[user_ip] != roll:
+    device_map = attendance[session_id]['devices']
+    if device_id in device_map and device_map[device_id] != roll:
         return 'This device has already been used to mark attendance for another student.', 400
 
-    # Check if the roll has already marked attendance
     if roll in attendance[session_id]['rolls']:
         return 'Attendance already marked for this student.', 400
 
@@ -150,7 +148,7 @@ def mark_attendance():
     if not row_mask.empty:
         df.loc[df[df.columns[0]].astype(str) == roll, today] = 1
         attendance[session_id]['rolls'].add(roll)
-        attendance[session_id]['ips'][user_ip] = roll
+        attendance[session_id]['devices'][device_id] = roll
 
         df.to_csv(session['filename'], index=False)
         return 'Attendance marked successfully!'

@@ -1,58 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Mark Attendance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
+      background-color: #f0f4f8;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f2f6ff;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
       margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
     }
-
     .container {
-      background-color: #fff;
-      padding: 30px;
+      background: #fff;
+      padding: 30px 20px;
       border-radius: 12px;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      width: 90%;
       max-width: 500px;
-      width: 100%;
-      text-align: center;
     }
-
     h2 {
       color: #003366;
+      text-align: center;
       margin-bottom: 20px;
     }
-
-    select, button {
-      padding: 10px;
+    label, select, button {
       width: 100%;
-      margin-top: 10px;
-      margin-bottom: 15px;
+      display: block;
+      margin: 10px 0;
+    }
+    select, button {
+      padding: 12px;
       font-size: 16px;
       border-radius: 6px;
       border: 1px solid #ccc;
     }
-
     button {
       background-color: #007bff;
       color: white;
       border: none;
       cursor: pointer;
     }
-
     button:hover {
       background-color: #0056b3;
     }
-
-    .status {
+    .note {
+      color: #cc0000;
       font-size: 14px;
-      color: #d00;
+      text-align: center;
       margin-top: 10px;
     }
   </style>
@@ -60,58 +60,58 @@
 <body>
   <div class="container">
     <h2>Mark Your Attendance</h2>
-
-    <form method="POST" action="/mark" onsubmit="return validateForm();">
+    <form action="/mark" method="post" onsubmit="return validateForm();">
       <input type="hidden" name="session_id" value="{{ session_id }}" />
+      
       <label for="roll_number">Select Your Name:</label>
       <select name="roll_number" id="roll_number" required>
-        <option value="">-- Select Your Name --</option>
+        <option value="" disabled selected>Select your name</option>
         {% for student in students %}
-        <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
+          <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
         {% endfor %}
       </select>
 
-      <input type="hidden" id="latitude" name="latitude">
-      <input type="hidden" id="longitude" name="longitude">
-
+      <input type="hidden" id="latitude" name="latitude" />
+      <input type="hidden" id="longitude" name="longitude" />
+      
       <button type="submit">Submit Attendance</button>
-      <div class="status" id="location-status">Fetching location...</div>
+      <div id="location-status" class="note"></div>
     </form>
   </div>
 
   <script>
-    const latInput = document.getElementById('latitude');
-    const lonInput = document.getElementById('longitude');
-    const statusDiv = document.getElementById('location-status');
-
-    function setStatus(msg, isError = false) {
-      statusDiv.textContent = msg;
-      statusDiv.style.color = isError ? '#d00' : '#060';
-    }
+    const latitudeInput = document.getElementById('latitude');
+    const longitudeInput = document.getElementById('longitude');
+    const locationStatus = document.getElementById('location-status');
 
     function validateForm() {
-      if (!latInput.value || !lonInput.value) {
-        alert("Location not fetched yet. Please allow location access.");
+      if (!latitudeInput.value || !longitudeInput.value) {
+        alert('Please allow location access before submitting.');
         return false;
       }
       return true;
     }
 
+    function setLocationStatus(msg, isError = false) {
+      locationStatus.textContent = msg;
+      locationStatus.style.color = isError ? '#cc0000' : '#007b00';
+    }
+
     window.onload = () => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-          position => {
-            latInput.value = position.coords.latitude.toFixed(6);
-            lonInput.value = position.coords.longitude.toFixed(6);
-            setStatus("Location detected successfully.");
+          (position) => {
+            latitudeInput.value = position.coords.latitude.toFixed(6);
+            longitudeInput.value = position.coords.longitude.toFixed(6);
+            setLocationStatus('Location detected.');
           },
-          () => {
-            setStatus("Failed to detect location. Please reload and allow access.", true);
+          (error) => {
+            setLocationStatus('Location access denied or unavailable.', true);
           },
           { timeout: 10000 }
         );
       } else {
-        setStatus("Geolocation not supported in your browser.", true);
+        setLocationStatus('Geolocation is not supported by your browser.', true);
       }
     };
   </script>

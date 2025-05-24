@@ -136,22 +136,29 @@ def mark_attendance():
         return 'Attendance already marked for this student.', 400
 
     ip_roll_map = attendance[session_id]['ips']
-    if user_ip in ip_roll_map:
-        if ip_roll_map[user_ip] != roll:
-            return 'This device has already been used to mark attendance for a different student.', 400
+    if user_ip in ip_roll_map and ip_roll_map[user_ip] != roll:
+        return 'This device has already been used to mark attendance.', 400
 
     df = pd.read_csv(session['filename'])
     today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     if today not in df.columns:
         df[today] = 0
 
-    row_mask = df[df[df.columns[0]] == roll]
-    if not row_mask.empty:
-        df.loc[df[df.columns[0]] == roll, today] = 1
-        df.to_csv(session['filename'], index=False)
+    present_rolls = set(df[df[today] == 1][df.columns[0]].astype(str))
 
+    row_mask = df[df[df.columns[0]].astype(str) == roll]
+    if not row_mask.empty:
+        df.loc[df[df.columns[0]].astype(str) == roll, today] = 1
         attendance[session_id]['rolls'].add(roll)
         ip_roll_map[user_ip] = roll
+
+        # Mark absent for others only once when marking the first attendance
+        for idx in df.index:
+            student_roll = str(df.loc[idx, df.columns[0]])
+            if student_roll not in attendance[session_id]['rolls']:
+                df.loc[idx, today] = 0
+
+        df.to_csv(session['filename'], index=False)
 
         return 'Attendance marked successfully!'
     else:
@@ -164,6 +171,11 @@ def download(session_id):
         return 'Invalid session ID.'
 
     df = pd.read_csv(session['filename'])
+    today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
+    if today not in df.columns:
+        df[today] = 0
+    df.to_csv(session['filename'], index=False)
+
     output = BytesIO()
     df.to_csv(output, index=False)
     output.seek(0)

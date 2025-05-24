@@ -1,96 +1,132 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Mark Attendance</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-        h2 { text-align: center; }
-        select, button {
-            width: 100%; padding: 10px; margin: 10px 0; font-size: 16px;
-        }
-        .status { margin-top: 15px; text-align: center; font-weight: bold; }
-        .error { color: red; }
-        .success { color: green; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mark Attendance</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f2f4f8;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      background-color: #ffffff;
+      padding: 20px;
+      border-radius: 10px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 22px;
+      color: #003366;
+      margin-bottom: 20px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+    }
+
+    label {
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    select,
+    button {
+      padding: 12px;
+      font-size: 16px;
+      margin-bottom: 16px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      width: 100%;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .note {
+      font-size: 14px;
+      color: red;
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
 </head>
 <body>
-    <h2>Select Your Name</h2>
-    <form id="attendanceForm">
-        <select id="roll_number" required>
-            <option value="">-- Select Your Name --</option>
-            {% for student in students %}
-                <option value="{{ student[roll_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
-            {% endfor %}
-        </select>
-        <button type="submit">Mark Attendance</button>
-        <div class="status" id="status"></div>
+  <div class="container">
+    <h1>Mark Your Attendance</h1>
+    <form id="attendanceForm" method="post" action="/mark" onsubmit="return attachLocation();">
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <input type="hidden" name="latitude" id="latitude">
+      <input type="hidden" name="longitude" id="longitude">
+      <input type="hidden" name="device_id" id="device_id">
+
+      <label for="roll_number">Select Your Name:</label>
+      <select name="roll_number" required>
+        {% for student in students %}
+          <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
+        {% endfor %}
+      </select>
+
+      <button type="submit">Submit Attendance</button>
+      <div class="note" id="status"></div>
     </form>
+  </div>
 
-    <script>
-        document.getElementById('attendanceForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-            const roll_number = document.getElementById('roll_number').value;
-            const statusDiv = document.getElementById('status');
+  <script>
+    function generateDeviceID() {
+      const fingerprint = navigator.userAgent + screen.width + screen.height + navigator.language;
+      return btoa(fingerprint).substring(0, 32);
+    }
 
-            if (!roll_number) {
-                statusDiv.textContent = "Please select your name.";
-                statusDiv.className = "status error";
-                return;
-            }
+    function attachLocation() {
+      const latInput = document.getElementById('latitude');
+      const lonInput = document.getElementById('longitude');
+      const deviceInput = document.getElementById('device_id');
+      const status = document.getElementById('status');
 
-            if (!navigator.geolocation) {
-                statusDiv.textContent = "Geolocation is not supported by your browser.";
-                statusDiv.className = "status error";
-                return;
-            }
+      deviceInput.value = generateDeviceID();
 
-            statusDiv.textContent = "Getting your location...";
-            navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true });
+      if (!navigator.geolocation) {
+        status.textContent = "Geolocation is not supported by your browser.";
+        return false;
+      }
 
-            function success(position) {
-                const latitude = position.coords.latitude;
-                const longitude = position.coords.longitude;
-                const device_id = getDeviceId();
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latInput.value = position.coords.latitude.toFixed(6);
+          lonInput.value = position.coords.longitude.toFixed(6);
+          document.getElementById('attendanceForm').submit();
+        },
+        () => {
+          status.textContent = "Please allow location access to mark attendance.";
+        },
+        { timeout: 10000 }
+      );
 
-                fetch("/mark", {
-                    method: "POST",
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        session_id: "{{ session_id }}",
-                        roll_number: roll_number,
-                        latitude: latitude,
-                        longitude: longitude,
-                        device_id: device_id
-                    })
-                })
-                .then(response => response.text())
-                .then(data => {
-                    statusDiv.textContent = data;
-                    statusDiv.className = data.includes("successfully") ? "status success" : "status error";
-                })
-                .catch(err => {
-                    statusDiv.textContent = "Error submitting attendance.";
-                    statusDiv.className = "status error";
-                });
-            }
-
-            function error() {
-                statusDiv.textContent = "Unable to retrieve your location.";
-                statusDiv.className = "status error";
-            }
-
-            function getDeviceId() {
-                // Fallback method: UUID stored in localStorage
-                let deviceId = localStorage.getItem("device_id");
-                if (!deviceId) {
-                    deviceId = 'dev-' + Math.random().toString(36).substr(2, 9);
-                    localStorage.setItem("device_id", deviceId);
-                }
-                return deviceId;
-            }
-        });
-    </script>
+      return false; // Prevent form submit until location is fetched
+    }
+  </script>
 </body>
 </html>

@@ -2,71 +2,87 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mark Attendance</title>
   <style>
     body {
-      background-color: #f0f8ff;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
-      padding: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f2f4f8;
       display: flex;
       justify-content: center;
       align-items: flex-start;
       min-height: 100vh;
+      padding: 20px;
     }
+
     .container {
-      background: #ffffff;
-      margin-top: 40px;
-      padding: 30px;
-      border-radius: 12px;
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-      width: 90%;
-      max-width: 600px;
+      background-color: #ffffff;
+      padding: 20px;
+      border-radius: 10px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     }
+
     h1 {
-      color: #003366;
       text-align: center;
+      font-size: 22px;
+      color: #003366;
       margin-bottom: 20px;
     }
+
     form {
       display: flex;
       flex-direction: column;
     }
-    label, select, button {
-      margin: 10px 0;
-      font-size: 16px;
+
+    label {
+      margin-bottom: 8px;
+      font-weight: 600;
     }
-    select, button {
-      padding: 10px;
+
+    select,
+    button {
+      padding: 12px;
+      font-size: 16px;
+      margin-bottom: 16px;
       border-radius: 6px;
       border: 1px solid #ccc;
+      width: 100%;
     }
+
     button {
       background-color: #007bff;
       color: white;
+      font-weight: bold;
       border: none;
       cursor: pointer;
+      transition: background 0.3s;
     }
+
     button:hover {
       background-color: #0056b3;
     }
+
     .note {
-      color: #e60000;
       font-size: 14px;
+      color: red;
       text-align: center;
+      margin-top: 10px;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Select Your Name to Mark Attendance</h1>
+    <h1>Mark Your Attendance</h1>
     <form id="attendanceForm" method="post" action="/mark" onsubmit="return attachLocation();">
-      <input type="hidden" name="session_id" value="{{ session_id }}" />
-      <input type="hidden" name="latitude" id="latitude" />
-      <input type="hidden" name="longitude" id="longitude" />
-      <input type="hidden" name="device_id" id="device_id" />
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <input type="hidden" name="latitude" id="latitude">
+      <input type="hidden" name="longitude" id="longitude">
+      <input type="hidden" name="device_id" id="device_id">
 
-      <label for="roll_number">Select your name:</label>
+      <label for="roll_number">Select Your Name:</label>
       <select name="roll_number" required>
         {% for student in students %}
           <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
@@ -80,7 +96,7 @@
 
   <script>
     function generateDeviceID() {
-      const fingerprint = navigator.userAgent + screen.width + screen.height;
+      const fingerprint = navigator.userAgent + screen.width + screen.height + navigator.language;
       return btoa(fingerprint).substring(0, 32);
     }
 
@@ -104,12 +120,12 @@
           document.getElementById('attendanceForm').submit();
         },
         () => {
-          status.textContent = "Location access denied. Cannot mark attendance.";
+          status.textContent = "Please allow location access to mark attendance.";
         },
         { timeout: 10000 }
       );
 
-      return false; // Prevent default submit to wait for geolocation
+      return false; // Prevent form submit until location is fetched
     }
   </script>
 </body>

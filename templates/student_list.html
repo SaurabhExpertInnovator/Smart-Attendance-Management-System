@@ -1,42 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Mark Attendance</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
-      background-color: #f0f4f8;
+      background-color: #f0f8ff;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
       padding: 0;
       display: flex;
-      flex-direction: column;
-      align-items: center;
       justify-content: center;
+      align-items: flex-start;
       min-height: 100vh;
     }
     .container {
-      background: #fff;
-      padding: 30px 20px;
+      background: #ffffff;
+      margin-top: 40px;
+      padding: 30px;
       border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
       width: 90%;
-      max-width: 500px;
+      max-width: 600px;
     }
-    h2 {
+    h1 {
       color: #003366;
       text-align: center;
       margin-bottom: 20px;
     }
+    form {
+      display: flex;
+      flex-direction: column;
+    }
     label, select, button {
-      width: 100%;
-      display: block;
       margin: 10px 0;
+      font-size: 16px;
     }
     select, button {
-      padding: 12px;
-      font-size: 16px;
+      padding: 10px;
       border-radius: 6px;
       border: 1px solid #ccc;
     }
@@ -50,70 +51,66 @@
       background-color: #0056b3;
     }
     .note {
-      color: #cc0000;
+      color: #e60000;
       font-size: 14px;
       text-align: center;
-      margin-top: 10px;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>Mark Your Attendance</h2>
-    <form action="/mark" method="post" onsubmit="return validateForm();">
+    <h1>Select Your Name to Mark Attendance</h1>
+    <form id="attendanceForm" method="post" action="/mark" onsubmit="return attachLocation();">
       <input type="hidden" name="session_id" value="{{ session_id }}" />
-      
-      <label for="roll_number">Select Your Name:</label>
-      <select name="roll_number" id="roll_number" required>
-        <option value="" disabled selected>Select your name</option>
+      <input type="hidden" name="latitude" id="latitude" />
+      <input type="hidden" name="longitude" id="longitude" />
+      <input type="hidden" name="device_id" id="device_id" />
+
+      <label for="roll_number">Select your name:</label>
+      <select name="roll_number" required>
         {% for student in students %}
           <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
         {% endfor %}
       </select>
 
-      <input type="hidden" id="latitude" name="latitude" />
-      <input type="hidden" id="longitude" name="longitude" />
-      
       <button type="submit">Submit Attendance</button>
-      <div id="location-status" class="note"></div>
+      <div class="note" id="status"></div>
     </form>
   </div>
 
   <script>
-    const latitudeInput = document.getElementById('latitude');
-    const longitudeInput = document.getElementById('longitude');
-    const locationStatus = document.getElementById('location-status');
+    function generateDeviceID() {
+      const fingerprint = navigator.userAgent + screen.width + screen.height;
+      return btoa(fingerprint).substring(0, 32);
+    }
 
-    function validateForm() {
-      if (!latitudeInput.value || !longitudeInput.value) {
-        alert('Please allow location access before submitting.');
+    function attachLocation() {
+      const latInput = document.getElementById('latitude');
+      const lonInput = document.getElementById('longitude');
+      const deviceInput = document.getElementById('device_id');
+      const status = document.getElementById('status');
+
+      deviceInput.value = generateDeviceID();
+
+      if (!navigator.geolocation) {
+        status.textContent = "Geolocation is not supported by your browser.";
         return false;
       }
-      return true;
-    }
 
-    function setLocationStatus(msg, isError = false) {
-      locationStatus.textContent = msg;
-      locationStatus.style.color = isError ? '#cc0000' : '#007b00';
-    }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latInput.value = position.coords.latitude.toFixed(6);
+          lonInput.value = position.coords.longitude.toFixed(6);
+          document.getElementById('attendanceForm').submit();
+        },
+        () => {
+          status.textContent = "Location access denied. Cannot mark attendance.";
+        },
+        { timeout: 10000 }
+      );
 
-    window.onload = () => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            latitudeInput.value = position.coords.latitude.toFixed(6);
-            longitudeInput.value = position.coords.longitude.toFixed(6);
-            setLocationStatus('Location detected.');
-          },
-          (error) => {
-            setLocationStatus('Location access denied or unavailable.', true);
-          },
-          { timeout: 10000 }
-        );
-      } else {
-        setLocationStatus('Geolocation is not supported by your browser.', true);
-      }
-    };
+      return false; // Prevent default submit to wait for geolocation
+    }
   </script>
 </body>
 </html>

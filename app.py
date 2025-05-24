@@ -4,6 +4,7 @@ import pandas as pd
 import qrcode
 import uuid
 import os
+import json
 from datetime import datetime
 from io import BytesIO
 from pytz import timezone
@@ -11,6 +12,7 @@ import math
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
+SESSIONS_FILE = 'sessions.json'
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -18,10 +20,19 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 qr_folder = os.path.join('static', 'qr')
 os.makedirs(qr_folder, exist_ok=True)
 
-sessions = {}  # session_id -> session details
 attendance = {}  # session_id -> {ip: [rolls]}
+BASE_URL = 'https://smart-attendance-management-system-tavt.onrender.com/'
 
-BASE_URL = 'https://attendance-system-project.onrender.com/'
+# Load sessions from file
+if os.path.exists(SESSIONS_FILE):
+    with open(SESSIONS_FILE, 'r') as f:
+        sessions = json.load(f)
+else:
+    sessions = {}
+
+def save_sessions():
+    with open(SESSIONS_FILE, 'w') as f:
+        json.dump(sessions, f)
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -66,6 +77,7 @@ def upload():
             'longitude': longitude,
             'radius': radius
         }
+        save_sessions()
 
         url = BASE_URL + 'scan/' + session_id
         qr = qrcode.make(url)

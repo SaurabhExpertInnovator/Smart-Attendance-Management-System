@@ -42,19 +42,43 @@
       border: none;
       cursor: pointer;
     }
-    button:hover {
+    button:hover:enabled {
       background-color: #0056b3;
     }
+    button:disabled {
+      background-color: #999;
+      cursor: not-allowed;
+    }
     .note {
-      color: #e60000;
       font-size: 14px;
       margin-top: 10px;
+      min-height: 1.2em;
+    }
+    .note.error {
+      color: #e60000;
+    }
+    .note.success {
+      color: #006600;
     }
     label {
       font-weight: bold;
       display: block;
       margin-top: 10px;
       text-align: left;
+    }
+    #retryBtn {
+      margin-top: 10px;
+      padding: 6px 12px;
+      font-size: 14px;
+      background-color: #004d40;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: none;
+    }
+    #retryBtn:hover {
+      background-color: #00695c;
     }
   </style>
 </head>
@@ -67,15 +91,13 @@
       <label for="radius">Allowed radius (meters):</label>
       <input type="number" id="radius" name="radius" min="1" required placeholder="Enter radius in meters" />
 
-      <label for="latitude">Latitude:</label>
-      <input type="text" id="latitude" name="latitude" placeholder="Latitude" required />
-
-      <label for="longitude">Longitude:</label>
-      <input type="text" id="longitude" name="longitude" placeholder="Longitude" required />
+      <input type="hidden" id="latitude" name="latitude" />
+      <input type="hidden" id="longitude" name="longitude" />
 
       <div id="location-status" class="note"></div>
+      <button type="button" id="retryBtn">Retry Location Access</button>
 
-      <button type="submit">Generate QR Code</button>
+      <button type="submit" id="submitBtn" disabled>Generate QR Code</button>
     </form>
   </div>
 
@@ -83,14 +105,12 @@
     const latitudeInput = document.getElementById('latitude');
     const longitudeInput = document.getElementById('longitude');
     const locationStatus = document.getElementById('location-status');
+    const retryBtn = document.getElementById('retryBtn');
+    const submitBtn = document.getElementById('submitBtn');
 
     function validateForm() {
       if (!latitudeInput.value || !longitudeInput.value) {
-        alert('Latitude and Longitude are required.');
-        return false;
-      }
-      if (!document.getElementById('radius').value) {
-        alert('Please enter the allowed radius.');
+        alert('Latitude and Longitude could not be fetched. Please allow location access.');
         return false;
       }
       return true;
@@ -98,26 +118,54 @@
 
     function setLocationStatus(msg, isError = false) {
       locationStatus.textContent = msg;
-      locationStatus.style.color = isError ? '#e60000' : '#006600';
+      locationStatus.className = 'note ' + (isError ? 'error' : 'success');
+      retryBtn.style.display = isError ? 'inline-block' : 'none';
+      submitBtn.disabled = isError;
     }
 
-    window.onload = () => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            latitudeInput.value = position.coords.latitude.toFixed(6);
-            longitudeInput.value = position.coords.longitude.toFixed(6);
-            setLocationStatus('Location detected automatically.');
-          },
-          () => {
-            setLocationStatus('Could not detect location automatically. Please enter manually.', true);
-          },
-          { timeout: 10000 }
-        );
-      } else {
+    function getLocation() {
+      setLocationStatus('Fetching your location... Please allow location access.', false);
+      retryBtn.style.display = 'none';
+      submitBtn.disabled = true;
+      latitudeInput.value = '';
+      longitudeInput.value = '';
+
+      if (!navigator.geolocation) {
         setLocationStatus('Geolocation is not supported by your browser.', true);
+        return;
       }
-    };
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latitudeInput.value = position.coords.latitude.toFixed(6);
+          longitudeInput.value = position.coords.longitude.toFixed(6);
+          setLocationStatus('Location detected automatically.');
+          submitBtn.disabled = false;
+        },
+        (error) => {
+          let message = '';
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              message = 'Location access denied. Please allow location access.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              message = 'Location information is unavailable.';
+              break;
+            case error.TIMEOUT:
+              message = 'Location request timed out. Please try again.';
+              break;
+            default:
+              message = 'An unknown error occurred while fetching location.';
+          }
+          setLocationStatus(message, true);
+        },
+        { timeout: 10000 }
+      );
+    }
+
+    window.onload = getLocation;
+
+    retryBtn.addEventListener('click', getLocation);
   </script>
 </body>
 </html>

@@ -1,52 +1,76 @@
-# app.py
-from flask import Flask, render_template, request, redirect, url_for, send_file, abort
+# Updated app.py with camera-based registration and attendance matching
+from flask import Flask, render_template, request, redirect, url_for, send_file, jsonify
 import pandas as pd
 import qrcode
 import uuid
 import os
 import json
+import base64
+import face_recognition
 from datetime import datetime
-from io import BytesIO
 from pytz import timezone
+from io import BytesIO
 import math
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-SESSIONS_FILE = 'sessions.json'
+app.config['PHOTO_FOLDER'] = 'static/photos'
+app.config['DATABASE_FILE'] = 'students.json'
 
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['PHOTO_FOLDER'], exist_ok=True)
 
-qr_folder = os.path.join('static', 'qr')
-os.makedirs(qr_folder, exist_ok=True)
+sessions = {}  # session_id -> session details
+attendance = {}  # session_id -> {ip: [rolls]}
+BASE_URL = 'https://attendance-system-project.onrender.com/'
 
-attendance = {}  # session_id -> {devices: {device_id: roll}, rolls: set()}
-BASE_URL = 'https://smart-attendance-management-system-tavt.onrender.com/'
-
-# Load sessions from file
-if os.path.exists(SESSIONS_FILE):
-    with open(SESSIONS_FILE, 'r') as f:
-        sessions = json.load(f)
-else:
-    sessions = {}
-
-def save_sessions():
-    with open(SESSIONS_FILE, 'w') as f:
-        json.dump(sessions, f)
-
+# ------------------- Utility -------------------
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     d_phi = math.radians(lat2 - lat1)
     d_lambda = math.radians(lon2 - lon1)
-    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    a = math.sin(d_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
+def load_students():
+    if os.path.exists(app.config['DATABASE_FILE']):
+        with open(app.config['DATABASE_FILE']) as f:
+            return json.load(f)
+    return {}
+
+def save_students(data):
+    with open(app.config['DATABASE_FILE'], 'w') as f:
+        json.dump(data, f, indent=4)
+
+# ------------------- Routes -------------------
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        name = request.form['name']
+        roll = request.form['roll']
+        photo_data = request.form['photo']
+
+        photo_data = photo_data.split(',')[1]
+        img_data = base64.b64decode(photo_data)
+        filename = f"{roll}.jpg"
+        filepath = os.path.join(app.config['PHOTO_FOLDER'], filename)
+
+        with open(filepath, 'wb') as f:
+            f.write(img_data)
+
+        students = load_students()
+        students[roll] = {'name': name, 'photo_path': filepath, 'attendance': []}
+        save_students(students)
+
+        return jsonify({'status': 'success'})
+    return render_template('register.html')
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -77,16 +101,15 @@ def upload():
             'longitude': longitude,
             'radius': radius
         }
-        save_sessions()
 
         url = BASE_URL + 'scan/' + session_id
         qr = qrcode.make(url)
-        qr_path = os.path.join(qr_folder, session_id + '.png')
+        qr_path = os.path.join('static', 'qr', session_id + '.png')
+        os.makedirs(os.path.dirname(qr_path), exist_ok=True)
         qr.save(qr_path)
 
         return render_template('qr_display.html', qr_path='qr/' + session_id + '.png', session_id=session_id)
-    else:
-        return 'File not uploaded.'
+    return 'File not uploaded.'
 
 @app.route('/scan/<session_id>')
 def scan(session_id):
@@ -103,57 +126,59 @@ def scan(session_id):
 
 @app.route('/mark', methods=['POST'])
 def mark_attendance():
-    try:
-        session_id = request.form['session_id']
-        roll = request.form['roll_number']
-        lat = request.form.get('latitude')
-        lon = request.form.get('longitude')
-        device_id = request.form.get('device_id')
-    except Exception as e:
-        return 'Invalid form data: {}'.format(str(e)), 400
-
-    if not lat or not lon or not roll or not session_id or not device_id:
-        return 'Missing required fields.', 400
-
-    try:
-        lat = float(lat)
-        lon = float(lon)
-    except ValueError:
-        return 'Invalid latitude or longitude.', 400
+    session_id = request.form['session_id']
+    roll = request.form['roll_number']
+    lat = float(request.form['latitude'])
+    lon = float(request.form['longitude'])
+    photo_data = request.form['photo']
+    user_ip = request.remote_addr
 
     session = sessions.get(session_id)
     if not session:
-        return 'Invalid session.', 400
+        return 'Invalid session.'
 
     dist = haversine(lat, lon, session['latitude'], session['longitude'])
     if dist > session['radius']:
-        return f'You are outside the allowed area (Distance: {dist:.2f} m). Attendance not marked.', 400
+        return f'Outside allowed area (Distance: {dist:.2f} m). Attendance not marked.'
 
-    if session_id not in attendance:
-        attendance[session_id] = {'devices': {}, 'rolls': set()}
+    # Face verification
+    students = load_students()
+    if roll not in students:
+        return 'Student not registered with photo.'
 
-    device_map = attendance[session_id]['devices']
-    if device_id in device_map and device_map[device_id] != roll:
-        return 'This device has already been used to mark attendance for another student.', 400
+    stored_path = students[roll]['photo_path']
+    photo_data = photo_data.split(',')[1]
+    img_data = base64.b64decode(photo_data)
+    temp_path = os.path.join(app.config['PHOTO_FOLDER'], f'temp_{roll}.jpg')
+    with open(temp_path, 'wb') as f:
+        f.write(img_data)
 
-    if roll in attendance[session_id]['rolls']:
-        return 'Attendance already marked for this student.', 400
+    try:
+        ref_enc = face_recognition.face_encodings(face_recognition.load_image_file(stored_path))[0]
+        new_enc = face_recognition.face_encodings(face_recognition.load_image_file(temp_path))[0]
+        match = face_recognition.compare_faces([ref_enc], new_enc)[0]
+    except:
+        match = False
+
+    if not match:
+        return 'Face does not match.'
+
+    if user_ip in attendance.get(session_id, {}) and roll in attendance[session_id][user_ip]:
+        return 'Attendance already marked.'
 
     df = pd.read_csv(session['filename'])
     today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
     if today not in df.columns:
         df[today] = 0
+    df.loc[df[df.columns[0]] == roll, today] = 1
 
-    row_mask = df[df[df.columns[0]].astype(str) == roll]
-    if not row_mask.empty:
-        df.loc[df[df.columns[0]].astype(str) == roll, today] = 1
-        attendance[session_id]['rolls'].add(roll)
-        attendance[session_id]['devices'][device_id] = roll
+    # Update percentage
+    df['Attendance %'] = df.iloc[:, 2:].mean(axis=1) * 100
+    df.to_csv(session['filename'], index=False)
 
-        df.to_csv(session['filename'], index=False)
-        return 'Attendance marked successfully!'
-    else:
-        return 'Student not found in list.', 400
+    attendance.setdefault(session_id, {}).setdefault(user_ip, []).append(roll)
+
+    return 'Attendance marked successfully!'
 
 @app.route('/download/<session_id>')
 def download(session_id):
@@ -162,19 +187,6 @@ def download(session_id):
         return 'Invalid session ID.'
 
     df = pd.read_csv(session['filename'])
-    today = datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d')
-    if today not in df.columns:
-        df[today] = 0
-
-    if session_id in attendance:
-        marked_rolls = attendance[session_id]['rolls']
-        for idx in df.index:
-            roll = str(df.loc[idx, df.columns[0]])
-            if roll not in marked_rolls:
-                df.at[idx, today] = 0
-
-    df.to_csv(session['filename'], index=False)
-
     output = BytesIO()
     df.to_csv(output, index=False)
     output.seek(0)

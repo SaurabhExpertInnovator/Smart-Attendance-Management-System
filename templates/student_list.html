@@ -1,131 +1,144 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mark Attendance</title>
+  <meta charset="UTF-8">
+  <title>Select Your Name</title>
   <style>
     body {
-      margin: 0;
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f2f4f8;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      min-height: 100vh;
-      padding: 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #e0f7fa;
+      padding: 30px;
     }
-
-    .container {
-      background-color: #ffffff;
-      padding: 20px;
-      border-radius: 10px;
-      width: 100%;
-      max-width: 400px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    }
-
-    h1 {
+    h2 {
       text-align: center;
-      font-size: 22px;
-      color: #003366;
-      margin-bottom: 20px;
+      color: #00796b;
     }
-
-    form {
-      display: flex;
-      flex-direction: column;
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
     }
-
-    label {
-      margin-bottom: 8px;
-      font-weight: 600;
-    }
-
-    select,
-    button {
+    th, td {
       padding: 12px;
-      font-size: 16px;
-      margin-bottom: 16px;
-      border-radius: 6px;
       border: 1px solid #ccc;
-      width: 100%;
-    }
-
-    button {
-      background-color: #007bff;
-      color: white;
-      font-weight: bold;
-      border: none;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-
-    button:hover {
-      background-color: #0056b3;
-    }
-
-    .note {
-      font-size: 14px;
-      color: red;
       text-align: center;
+    }
+    tr:hover {
+      background-color: #b2dfdb;
+    }
+    .submit-btn {
+      margin-top: 20px;
+      display: block;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #00796b;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .submit-btn:disabled {
+      background-color: #999;
+      cursor: not-allowed;
+    }
+    .note {
+      color: red;
+      font-weight: bold;
       margin-top: 10px;
+      text-align: center;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Mark Your Attendance</h1>
-    <form id="attendanceForm" method="post" action="/mark" onsubmit="return attachLocation();">
-      <input type="hidden" name="session_id" value="{{ session_id }}">
-      <input type="hidden" name="latitude" id="latitude">
-      <input type="hidden" name="longitude" id="longitude">
-      <input type="hidden" name="device_id" id="device_id">
+  <h2>Select Your Name and Roll Number</h2>
+  <div class="note" id="note">Fetching your location... Please allow location access.</div>
 
-      <label for="roll_number">Select Your Name:</label>
-      <select name="roll_number" required>
-        {% for student in students %}
-          <option value="{{ student[roll_col] }}">{{ student[roll_col] }} - {{ student[name_col] }}</option>
-        {% endfor %}
-      </select>
+  <form id="attendanceForm">
+    <input type="hidden" name="session_id" value="{{ session_id }}">
+    <input type="hidden" id="latitude" name="latitude" />
+    <input type="hidden" id="longitude" name="longitude" />
+    <input type="hidden" name="name" id="student_name" />
+    <input type="hidden" name="photo" id="photoData" />
 
-      <button type="submit">Submit Attendance</button>
-      <div class="note" id="status"></div>
-    </form>
-  </div>
+    <table>
+      <tr>
+        <th>Select</th>
+        <th>{{ roll_col }}</th>
+        <th>{{ name_col }}</th>
+      </tr>
+      {% for student in students %}
+      <tr>
+        <td>
+          <input type="radio" name="roll_number" value="{{ student[roll_col] }}" required
+                 data-name="{{ student[name_col] }}">
+        </td>
+        <td>{{ student[roll_col] }}</td>
+        <td>{{ student[name_col] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <video id="video" width="320" height="240" autoplay></video><br>
+    <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+    <button type="button" class="submit-btn" id="submitBtn" disabled onclick="captureAndSubmit()">Submit Attendance</button>
+  </form>
 
   <script>
-    function generateDeviceID() {
-      const fingerprint = navigator.userAgent + screen.width + screen.height + navigator.language;
-      return btoa(fingerprint).substring(0, 32);
-    }
+    let latitude = null, longitude = null;
 
-    function attachLocation() {
-      const latInput = document.getElementById('latitude');
-      const lonInput = document.getElementById('longitude');
-      const deviceInput = document.getElementById('device_id');
-      const status = document.getElementById('status');
-
-      deviceInput.value = generateDeviceID();
-
-      if (!navigator.geolocation) {
-        status.textContent = "Geolocation is not supported by your browser.";
-        return false;
+    window.onload = function() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          function(position) {
+            latitude = position.coords.latitude;
+            longitude = position.coords.longitude;
+            document.getElementById("latitude").value = latitude;
+            document.getElementById("longitude").value = longitude;
+            document.getElementById("note").style.display = "none";
+            document.getElementById("submitBtn").disabled = false;
+          },
+          function(error) {
+            document.getElementById("note").innerText = "Location access denied or unavailable. Attendance cannot be marked.";
+            alert("Please allow location access and refresh the page to mark attendance.");
+            document.getElementById("submitBtn").disabled = true;
+          }
+        );
+      } else {
+        alert("Geolocation is not supported by your browser.");
+        document.getElementById("note").innerText = "Geolocation is not supported by your browser.";
+        document.getElementById("submitBtn").disabled = true;
       }
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          latInput.value = position.coords.latitude.toFixed(6);
-          lonInput.value = position.coords.longitude.toFixed(6);
-          document.getElementById('attendanceForm').submit();
-        },
-        () => {
-          status.textContent = "Please allow location access to mark attendance.";
-        },
-        { timeout: 10000 }
-      );
+      // Set student name
+      document.querySelectorAll('input[name="roll_number"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+          document.getElementById('student_name').value = this.getAttribute('data-name');
+        });
+      });
 
-      return false; // Prevent form submit until location is fetched
+      // Start webcam
+      const video = document.getElementById("video");
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+        });
+    };
+
+    function captureAndSubmit() {
+      const canvas = document.getElementById("canvas");
+      const context = canvas.getContext("2d");
+      context.drawImage(document.getElementById("video"), 0, 0, 320, 240);
+      const photo = canvas.toDataURL("image/jpeg");
+      document.getElementById("photoData").value = photo;
+
+      const formData = new FormData(document.getElementById("attendanceForm"));
+      fetch("/mark", {
+        method: "POST",
+        body: formData
+      })
+      .then(res => res.text())
+      .then(data => alert(data))
+      .catch(() => alert("Failed to mark attendance."));
     }
   </script>
 </body>

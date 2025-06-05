@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Face-Recognition Attendance</title>
+  <style>
+    body{font-family:'Segoe UI',sans-serif;background:#f4f9ff;text-align:center;padding:20px;margin:0}
+    h2{color:#003366;margin-top:0}
+    video,canvas{border:3px solid #007bff;border-radius:8px;width:320px;height:240px;margin-top:10px}
+    select,button{margin-top:15px;padding:10px 14px;font-size:16px;border-radius:6px;border:1px solid #ccc;width:300px}
+    button{background:#007bff;color:#fff;border:none;cursor:pointer}
+    button:disabled{background:#9cc7ff;cursor:not-allowed}
+    button:hover:not(:disabled){background:#0056b3}
+    #countdown{font-size:18px;margin-top:10px;color:#555}
+    #message{margin-top:20px;font-weight:bold}
+  </style>
+</head>
+<body>
+  <h2>Face-Recognition Attendance</h2>
+  <p>Please allow <strong>camera</strong> and <strong>location</strong> access.</p>
+
+  <!-- Roll-number dropdown -->
+  <select id="roll" required>
+    <option value="" disabled selected>Select Your Name</option>
+    {% for student in students %}
+      <option value="{{ student[roll_col] }}">{{ student[name_col] }} ({{ student[roll_col] }})</option>
+    {% endfor %}
+  </select><br>
+
+  <!-- Camera preview -->
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" width="320" height="240" style="display:none"></canvas>
+
+  <div id="countdown"></div>
+  <button id="submitBtn" onclick="startCountdown()">Submit Attendance</button>
+
+  <div id="message"></div>
+
+<script>
+/* ---------- DOM handles ---------- */
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const msg        = document.getElementById('message');
+const countdown  = document.getElementById('countdown');
+const submitBtn  = document.getElementById('submitBtn');
+const rollSelect = document.getElementById('roll');
+const SESSION_ID = "{{ session_id }}";
+
+let lat = null, lon = null;
+
+/* ---------- Camera stream ---------- */
+navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
+  .then(stream => video.srcObject = stream)
+  .catch(()   => showMsg('❌ Unable to access camera.','red'));
+
+/* ---------- Geo-location ---------- */
+navigator.geolocation.getCurrentPosition(
+  pos => { lat = pos.coords.latitude; lon = pos.coords.longitude; },
+  ()  => showMsg('⚠️ Location permission denied.','red'),
+  { enableHighAccuracy:true, timeout:10000 }
+);
+
+/* ---------- Countdown + snapshot ---------- */
+function startCountdown(){
+  const roll = rollSelect.value;
+  if(!roll){ showMsg('Please select your name.','red'); return; }
+  if(lat===null||lon===null){
+    showMsg('Fetching location… please try again in a moment.','red');
+    return;
+  }
+
+  submitBtn.disabled = true;
+  let sec = 3;
+  countdown.textContent = `Capturing photo in ${sec}…`;
+  const t = setInterval(()=>{
+    sec--;
+    countdown.textContent = `Capturing photo in ${sec}…`;
+    if(sec===0){
+      clearInterval(t);
+      countdown.textContent='';
+      captureAndSend(roll);
+    }
+  },1000);
+}
+
+function captureAndSend(roll){
+  /* Draw frame → canvas */
+  canvas.width  = video.videoWidth  || 320;
+  canvas.height = video.videoHeight || 240;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const photo = canvas.toDataURL('image/jpeg',0.80);  // 80 % quality
+
+  /* Build multipart/form-data */
+  const fd = new FormData();
+  fd.append('session_id', SESSION_ID);
+  fd.append('roll_number', roll);
+  fd.append('latitude',  lat);
+  fd.append('longitude', lon);
+  fd.append('photo', photo);
+
+  showMsg('Uploading…','black');
+
+  fetch('/mark',{ method:'POST', body:fd })
+    .then(r => r.json())
+    .then(res => showMsg(res.message, res.status==='success'?'green':'red'))
+    .catch(() => showMsg('❌ Network error while submitting.','red'))
+    .finally(() => { submitBtn.disabled = false; });
+}
+
+/* ---------- Helper ---------- */
+function showMsg(text,color){ msg.textContent=text; msg.style.color=color; }
+</script>
+</body>
+</html>
